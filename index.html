@@ -130,6 +130,47 @@
       margin-top: 2px;
     }
     
+    .palette-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 14px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+    }
+    
+    .palette-bar::-webkit-scrollbar { display: none; }
+    
+    .palette-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 11px;
+      white-space: nowrap;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+    
+    .palette-btn:hover { background: rgba(255,255,255,0.15); }
+    
+    .palette-btn.active {
+      border-color: transparent;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.2);
+    }
+    
+    .palette-swatch {
+      width: 40px;
+      height: 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.25);
+    }
+    
     .status-line {
       font-size: 11px;
       margin-top: 2px;
@@ -607,16 +648,16 @@
     <button class="action-btn help-btn" id="helpBtn">? Help [H]</button>
     <button class="action-btn folder-btn" id="folderBtn">📁 Folder [O]</button>
     <button class="action-btn rescan-btn" id="rescanBtn">↻ Rescan [R]</button>
-    <button class="action-btn color-btn-main" id="colorBtn">🎨 <span id="colorName">Neon</span> [C]</button>
     <button class="action-btn fullscreen-btn" id="fullscreenBtn">⛶ Fullscreen [F]</button>
   </div>
   
   <div class="shortcuts-hint hidden" id="shortcutsHint">
-    1-9, 0 → visuals | C → colors | O → folder | R → rescan | H → help | F → fullscreen<br>
+    1-9, 0 → visuals | C → next palette | O → folder | R → rescan | H → help | F → fullscreen<br>
     Space → play/pause | ←→ → tracks
   </div>
   
   <div class="controls hidden" id="controls">
+    <div class="palette-bar" id="paletteBar"></div>
     <div class="viz-modes" id="vizModes"></div>
     
     <div class="player-row">
@@ -1013,9 +1054,7 @@
       analyser.getByteTimeDomainData(timeArray);
       const w = window.innerWidth, h = window.innerHeight;
       
-      const rms = getRmsLevel();
-      const fade = 0.18 - Math.min(0.12, rms * 0.18);
-      ctx.fillStyle = `rgba(0, 0, 0, ${Math.max(0.06, fade)})`;
+      ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, w, h);
       
       const bars = SPECTRUM_BARS;
@@ -1677,6 +1716,18 @@
       vizModes.appendChild(btn);
     });
     
+    // Build palette buttons
+    const paletteBar = document.getElementById('paletteBar');
+    colorSchemes.forEach((scheme, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'palette-btn' + (i === currentColorIndex ? ' active' : '');
+      const gradient = `linear-gradient(90deg, ${scheme.colors.join(',')})`;
+      btn.innerHTML = `<span class="palette-swatch" style="background: ${gradient}"></span>${scheme.name}`;
+      btn.dataset.index = i;
+      btn.onclick = () => setColorScheme(i);
+      paletteBar.appendChild(btn);
+    });
+    
     function setVisualization(index) {
       currentVizIndex = index;
       document.querySelectorAll('.viz-btn').forEach((b, i) => {
@@ -1698,7 +1749,9 @@
     
     function setColorScheme(index) {
       currentColorIndex = index;
-      document.getElementById('colorName').textContent = colorSchemes[index].name;
+      document.querySelectorAll('.palette-btn').forEach((b, i) => {
+        b.classList.toggle('active', i === index);
+      });
       showModeDisplay(colorSchemes[index].name, colorSchemes[index].colors[0]);
     }
     
@@ -2436,10 +2489,6 @@
     
     document.getElementById('fullscreenBtn').onclick = () => {
       document.fullscreenElement ? document.exitFullscreen() : document.body.requestFullscreen();
-    };
-    
-    document.getElementById('colorBtn').onclick = () => {
-      setColorScheme((currentColorIndex + 1) % colorSchemes.length);
     };
     
     // Auto-hide controls
