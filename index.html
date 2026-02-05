@@ -710,6 +710,8 @@
     ];
     
     let currentVizIndex = 0;
+    const SPECTRUM_BARS = 96;
+    let spectrumPeaks = new Float32Array(SPECTRUM_BARS);
     
     // ==================== COLOR SCHEMES ====================
     const colorSchemes = [
@@ -974,25 +976,64 @@
     function getMid() { return getAvgFrequency(10, 100) || 0; }
     function getTreble() { return getAvgFrequency(100, bufferLength) || 0; }
     
+    function resetSpectrumPeaks() {
+      spectrumPeaks = new Float32Array(SPECTRUM_BARS);
+    }
+    
+    function getRmsLevel() {
+      if (!timeArray || !timeArray.length) return 0;
+      let sum = 0;
+      for (let i = 0; i < timeArray.length; i++) {
+        const v = (timeArray[i] - 128) / 128;
+        sum += v * v;
+      }
+      return Math.sqrt(sum / timeArray.length);
+    }
+    
+    function getFreqIndexForHz(freq, nyquist) {
+      if (!bufferLength) return 0;
+      const clamped = Math.max(0, Math.min(nyquist, freq));
+      return Math.min(bufferLength - 1, Math.max(0, Math.round((clamped / nyquist) * (bufferLength - 1))));
+    }
+    
+    function getAvgFrequencyByHz(minHz, maxHz, nyquist) {
+      if (!dataArray || !bufferLength) return 0;
+      const start = getFreqIndexForHz(minHz, nyquist);
+      const end = Math.max(start + 1, getFreqIndexForHz(maxHz, nyquist));
+      let sum = 0;
+      for (let i = start; i <= end; i++) sum += dataArray[i];
+      return sum / Math.max(1, end - start + 1);
+    }
+    
     // Safe radius for canvas arc (prevents IndexSizeError)
     function safeRadius(r) { return Math.max(0.1, r) || 0.1; }
     
     // ==================== SPECTRUM BARS ====================
     function drawSpectrum() {
       analyser.getByteFrequencyData(dataArray);
+      analyser.getByteTimeDomainData(timeArray);
       const w = window.innerWidth, h = window.innerHeight;
       
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+      const rms = getRmsLevel();
+      const fade = 0.18 - Math.min(0.12, rms * 0.18);
+      ctx.fillStyle = `rgba(0, 0, 0, ${Math.max(0.06, fade)})`;
       ctx.fillRect(0, 0, w, h);
       
-      const bars = 128;
+      const bars = SPECTRUM_BARS;
       const barW = w / bars;
-      const bass = getBass();
+      const nyquist = (audioContext ? audioContext.sampleRate : 48000) / 2;
+      const bass = getAvgFrequencyByHz(30, 140, nyquist);
+      const treble = getAvgFrequencyByHz(2000, 8000, nyquist);
+      const minFreq = 30;
+      const maxFreq = Math.min(16000, nyquist);
       
       for (let i = 0; i < bars; i++) {
-        const idx = Math.floor(i * bufferLength / bars);
-        const val = dataArray[idx];
-        const barH = (val / 255) * h * 0.85;
+        const t = i / (bars - 1);
+        const freq = minFreq * Math.pow(maxFreq / minFreq, t);
+        const idx = getFreqIndexForHz(freq, nyquist);
+        const val = dataArray[idx] / 255;
+        const scaled = Math.pow(val, 1.15);
+        const barH = scaled * h * 0.9;
         
         const gradient = ctx.createLinearGradient(0, h, 0, h - barH);
         gradient.addColorStop(0, getColor(i, bars));
@@ -1001,14 +1042,22 @@
         
         ctx.fillStyle = gradient;
         ctx.shadowColor = getColor(i, bars);
-        ctx.shadowBlur = bass > 200 ? 30 : 10;
+        ctx.shadowBlur = 8 + (bass / 255) * 28;
         
         const x = i * barW;
         ctx.fillRect(x + 1, h - barH, barW - 2, barH);
         
+        // Peak cap
+        const peak = spectrumPeaks[i] || 0;
+        if (barH > peak) spectrumPeaks[i] = barH;
+        else spectrumPeaks[i] = peak * 0.92;
+        const capY = h - spectrumPeaks[i] - 2;
+        ctx.fillStyle = getColor(i + bars/3, bars);
+        ctx.fillRect(x + 2, capY, barW - 4, 2);
+        
         // Mirror reflection
-        ctx.globalAlpha = 0.3;
-        ctx.fillRect(x + 1, h, barW - 2, barH * 0.3);
+        ctx.globalAlpha = 0.25 + Math.min(0.2, treble / 600);
+        ctx.fillRect(x + 1, h, barW - 2, barH * 0.28);
         ctx.globalAlpha = 1;
       }
       ctx.shadowBlur = 0;
@@ -1640,6 +1689,7 @@
       fireworks = [];
       fwParticles = [];
       matrixDrops = [];
+      resetSpectrumPeaks();
       // Reset canvas state
       ctx.globalAlpha = 1;
       ctx.shadowBlur = 0;
@@ -1767,7 +1817,10 @@
       if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         analyser = audioContext.createAnalyser();
-        analyser.fftSize = 512;
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.3;
+        analyser.minDecibels = -90;
+        analyser.maxDecibels = -10;
         bufferLength = analyser.frequencyBinCount;
         dataArray = new Uint8Array(bufferLength);
         timeArray = new Uint8Array(bufferLength);
