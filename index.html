@@ -128,6 +128,15 @@
       margin-top: 2px;
     }
     
+    .status-line {
+      font-size: 11px;
+      margin-top: 2px;
+      color: rgba(255,255,255,0.6);
+    }
+    
+    .status-line[data-state="warn"] { color: rgba(234, 179, 8, 0.95); }
+    .status-line[data-state="error"] { color: rgba(220, 38, 38, 0.95); }
+    
     .progress-bar {
       flex: 2;
       height: 6px;
@@ -303,6 +312,45 @@
     
     .shortcuts-hint.hidden { opacity: 0; }
     
+    .start-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 250;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+      background: radial-gradient(circle at center, rgba(0,0,0,0.4), rgba(0,0,0,0.9));
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    
+    .start-overlay.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    
+    .start-btn {
+      font-size: 28px;
+      padding: 18px 36px;
+      border-radius: 999px;
+      border: none;
+      color: #fff;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      cursor: pointer;
+      box-shadow: 0 20px 60px rgba(102,126,234,0.4);
+    }
+    
+    .start-hint {
+      font-size: 14px;
+      opacity: 0.75;
+      text-align: center;
+      max-width: 320px;
+      line-height: 1.5;
+    }
+    
     .help-overlay {
       position: fixed;
       inset: 0;
@@ -405,6 +453,10 @@
   
   <div class="mode-display" id="modeDisplay"></div>
   <div class="error-toast" id="errorToast"></div>
+  <div class="start-overlay show" id="startOverlay">
+    <button class="start-btn" id="startBtn">▶ Start Audio</button>
+    <div class="start-hint" id="startHint">Click to unlock audio and play.</div>
+  </div>
   <div class="help-overlay" id="helpOverlay">
     <div class="help-card">
       <div class="help-header">
@@ -492,6 +544,7 @@
         <div class="track-name" id="trackName">No track loaded</div>
         <div class="track-time" id="trackTime">0:00 / 0:00</div>
         <div class="playlist-time" id="playlistTime">Playlist: --:-- · Loop: 0</div>
+        <div class="status-line" id="statusLine" data-state="info">Waiting for audio…</div>
       </div>
       <div class="progress-bar" id="progressBar">
         <div class="progress-fill" id="progressFill"></div>
@@ -522,6 +575,7 @@
     let totalPlaylistSeconds = 0;
     let durationScanId = 0;
     let loopAll = true;
+    let lastStatus = '';
     const supportsDirectoryPicker = 'showDirectoryPicker' in window;
     const supportsDirInput = 'webkitdirectory' in document.createElement('input');
     const AUDIO_FILE_REGEX = /\.(mp3|wav|aiff|aif|flac|m4a|ogg|aac|alac|wma|opus)$/i;
@@ -1466,6 +1520,31 @@
       }
     }
     
+    function setStatus(msg, type = 'info') {
+      if (!msg || msg === lastStatus) return;
+      lastStatus = msg;
+      const line = document.getElementById('statusLine');
+      if (!line) return;
+      line.textContent = msg;
+      line.dataset.state = type;
+    }
+    
+    function showStartOverlay(show) {
+      const overlay = document.getElementById('startOverlay');
+      if (!overlay) return;
+      overlay.classList.toggle('show', !!show);
+    }
+    
+    function updateStartOverlay() {
+      const hint = document.getElementById('startHint');
+      if (!hint) return;
+      if (!tracks.length) {
+        hint.textContent = 'Click to choose a folder and unlock audio.';
+      } else {
+        hint.textContent = 'Click to unlock audio and play.';
+      }
+    }
+    
     // ==================== AUDIO ====================
     function initAudio() {
       if (!audioContext) {
@@ -1495,14 +1574,17 @@
     
     function showError(msg) {
       showToast(msg, 'error');
+      setStatus(msg, 'error');
     }
     
     function showInfo(msg) {
       showToast(msg, 'info');
+      setStatus(msg, 'info');
     }
     
     function showWarn(msg) {
       showToast(msg, 'warn');
+      setStatus(msg, 'warn');
     }
     
     function describeAudioError(track, error) {
@@ -1544,10 +1626,24 @@
       showInfo(`Loading: ${track.name}`);
       audio.addEventListener('error', () => {
         showError(describeAudioError(track, audio.error));
+        showStartOverlay(true);
       });
       audio.addEventListener('canplay', () => {
         showInfo(`Ready: ${track.name}`);
       }, { once: true });
+      audio.addEventListener('playing', () => {
+        setStatus(`Playing: ${track.name}`, 'info');
+        showStartOverlay(false);
+      });
+      audio.addEventListener('pause', () => {
+        if (!audio.ended) setStatus(`Paused: ${track.name}`, 'info');
+      });
+      audio.addEventListener('waiting', () => {
+        setStatus(`Buffering: ${track.name}`, 'warn');
+      });
+      audio.addEventListener('stalled', () => {
+        setStatus(`Stalled: ${track.name}`, 'warn');
+      });
       
       initAudio();
       source = audioContext.createMediaElementSource(audio);
@@ -1577,6 +1673,7 @@
     function play() {
       if (!audio) {
         showWarn('No track loaded. Choose a folder first.');
+        showStartOverlay(true);
         return;
       }
       initAudio();
@@ -1584,6 +1681,7 @@
       if (resumePromise && resumePromise.catch) {
         resumePromise.catch(() => {
           showWarn('Audio context is blocked. Click the page to enable sound.');
+          showStartOverlay(true);
         });
       }
       
@@ -1592,18 +1690,22 @@
         playPromise.then(() => {
           isPlaying = true;
           updatePlayIcon(true);
+          showStartOverlay(false);
         }).catch(err => {
           isPlaying = false;
           updatePlayIcon(false);
           if (err && err.name === 'NotAllowedError') {
             showWarn('Playback blocked. Click anywhere or press Space to start.');
+            showStartOverlay(true);
           } else {
             showError('Playback failed. Try another track or browser.');
+            showStartOverlay(true);
           }
         });
       } else {
         isPlaying = true;
         updatePlayIcon(true);
+        showStartOverlay(false);
       }
     }
     
@@ -1696,6 +1798,7 @@
         updatePlaylist();
         if (!audio) loadTrack(0);
       }
+      updateStartOverlay();
       showInfo(`Added ${audioFiles.length} track${audioFiles.length === 1 ? '' : 's'}.`);
       
       if (playlistLoopCount === 0 && tracks.length) {
@@ -1745,6 +1848,7 @@
         loadTrack(0);
         play();
       }
+      updateStartOverlay();
       if (tracks.length) {
         playlistLoopCount = 1;
       } else {
@@ -1968,6 +2072,13 @@
     document.getElementById('helpOverlay').addEventListener('click', e => {
       if (e.target.id === 'helpOverlay') toggleHelp(false);
     });
+    document.getElementById('startBtn').onclick = async () => {
+      if (!tracks.length) {
+        await chooseFolder();
+      }
+      if (!audio && tracks.length) loadTrack(0);
+      play();
+    };
     
     document.getElementById('progressBar').onclick = e => {
       if (!audio || !isFinite(audio.duration)) return;
@@ -2062,6 +2173,7 @@
       }
     }
     
+    updateStartOverlay();
     autoLoadSavedFolder();
     
     // ==================== ANIMATION LOOP ====================
