@@ -1,0 +1,17 @@
+.DS_Store
+
+# Audio files
+*.aiff
+*.aif
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.ogg
+*.aac
+*.alac
+*.wma
+*.opus
+
+# Audio folders
+mp3/
