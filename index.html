@@ -122,6 +122,12 @@
       margin-top: 3px;
     }
     
+    .playlist-time {
+      font-size: 11px;
+      color: rgba(255,255,255,0.45);
+      margin-top: 2px;
+    }
+    
     .progress-bar {
       flex: 2;
       height: 6px;
@@ -156,10 +162,20 @@
     .drop-text { font-size: 24px; opacity: 0.5; }
     .drop-hint { font-size: 14px; opacity: 0.3; margin-top: 10px; }
     
-    .fullscreen-btn, .color-btn-main, .rescan-btn, .folder-btn {
+    .top-actions {
       position: fixed;
       top: 20px;
+      right: 20px;
       z-index: 100;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      max-width: calc(100% - 40px);
+      transition: opacity 0.3s;
+    }
+    
+    .action-btn {
       background: rgba(255,255,255,0.1);
       border: 1px solid rgba(255,255,255,0.2);
       color: #fff;
@@ -167,24 +183,19 @@
       border-radius: 8px;
       cursor: pointer;
       font-size: 14px;
-      transition: all 0.2s, opacity 0.3s;
+      transition: all 0.2s;
     }
     
-    .fullscreen-btn { right: 20px; }
-    .color-btn-main { right: 130px; }
-    .rescan-btn { right: 260px; }
-    .folder-btn { right: 390px; }
-    
-    .fullscreen-btn:hover, .color-btn-main:hover, .rescan-btn:hover, .folder-btn:hover {
+    .action-btn:hover {
       background: rgba(255,255,255,0.2);
     }
     
-    .fullscreen-btn.hidden, .color-btn-main.hidden, .rescan-btn.hidden, .folder-btn.hidden {
+    .top-actions.hidden {
       opacity: 0;
       pointer-events: none;
     }
     
-    .fullscreen-btn:disabled, .color-btn-main:disabled, .rescan-btn:disabled, .folder-btn:disabled {
+    .action-btn:disabled {
       opacity: 0.4;
       cursor: not-allowed;
     }
@@ -297,7 +308,7 @@
   <div class="drop-zone" id="dropZone">
     <div class="drop-icon">🎵</div>
     <div class="drop-text">Drop audio files here</div>
-    <div class="drop-hint">click anywhere to browse files or press O to choose a folder</div>
+    <div class="drop-hint">click anywhere or press O to choose a folder</div>
     <div class="drop-hint" style="margin-top: 15px; color: #f5af19;">⚠️ AIFF files require Safari</div>
   </div>
   
@@ -310,13 +321,16 @@
     <div id="playlistItems"></div>
   </div>
   
-  <button class="folder-btn" id="folderBtn">📁 Folder [O]</button>
-  <button class="rescan-btn" id="rescanBtn">↻ Rescan [R]</button>
-  <button class="color-btn-main" id="colorBtn">🎨 <span id="colorName">Neon</span> [C]</button>
-  <button class="fullscreen-btn" id="fullscreenBtn">⛶ Fullscreen [F]</button>
+  <div class="top-actions" id="topActions">
+    <button class="action-btn help-btn" id="helpBtn">? Help [H]</button>
+    <button class="action-btn folder-btn" id="folderBtn">📁 Folder [O]</button>
+    <button class="action-btn rescan-btn" id="rescanBtn">↻ Rescan [R]</button>
+    <button class="action-btn color-btn-main" id="colorBtn">🎨 <span id="colorName">Neon</span> [C]</button>
+    <button class="action-btn fullscreen-btn" id="fullscreenBtn">⛶ Fullscreen [F]</button>
+  </div>
   
   <div class="shortcuts-hint" id="shortcutsHint">
-    1-9, 0 → visuals | C → colors | O → folder | R → rescan<br>
+    1-9, 0 → visuals | C → colors | O → folder | R → rescan | H → help<br>
     Space → play/pause | ←→ → tracks
   </div>
   
@@ -330,6 +344,7 @@
       <div class="track-info">
         <div class="track-name" id="trackName">No track loaded</div>
         <div class="track-time" id="trackTime">0:00 / 0:00</div>
+        <div class="playlist-time" id="playlistTime">Playlist: --:-- · Loop: 0</div>
       </div>
       <div class="progress-bar" id="progressBar">
         <div class="progress-fill" id="progressFill"></div>
@@ -345,6 +360,7 @@
     const ctx = canvas.getContext('2d');
     
     let audioContext, analyser, source, audio;
+    let analyserConnected = false;
     let dataArray, bufferLength, timeArray;
     let tracks = [];
     let currentTrackIndex = -1;
@@ -355,7 +371,12 @@
     let time = 0;
     let directoryHandle = null;
     let lastFolderLabel = '';
+    let playlistLoopCount = 0;
+    let totalPlaylistSeconds = 0;
+    let durationScanId = 0;
+    let loopAll = true;
     const supportsDirectoryPicker = 'showDirectoryPicker' in window;
+    const supportsDirInput = 'webkitdirectory' in document.createElement('input');
     const AUDIO_FILE_REGEX = /\.(mp3|wav|aiff|aif|flac|m4a|ogg|aac|alac|wma|opus)$/i;
     const HANDLE_DB_NAME = 'dj-visualizer';
     const HANDLE_DB_STORE = 'handles';
@@ -458,6 +479,74 @@
         return;
       }
       currentTrackIndex = tracks.findIndex(t => t.id === currentTrackId);
+    }
+    
+    function formatDuration(totalSeconds) {
+      if (!isFinite(totalSeconds)) return '--:--';
+      const seconds = Math.max(0, Math.floor(totalSeconds));
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const secs = seconds % 60;
+      if (hours > 0) {
+        return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      }
+      return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
+    
+    function updatePlaylistStats() {
+      const playlistTimeEl = document.getElementById('playlistTime');
+      if (!playlistTimeEl) return;
+      if (!tracks.length) {
+        playlistLoopCount = 0;
+        totalPlaylistSeconds = 0;
+        playlistTimeEl.textContent = 'Playlist: --:-- · Loop: 0';
+        return;
+      }
+      
+      const durations = tracks.map(t => (isFinite(t.duration) ? t.duration : 0));
+      const unknownCount = tracks.filter(t => !isFinite(t.duration)).length;
+      totalPlaylistSeconds = durations.reduce((sum, val) => sum + val, 0);
+      const totalLabel = formatDuration(totalPlaylistSeconds) + (unknownCount ? ' +' : '');
+      const loopLabel = playlistLoopCount > 0 ? playlistLoopCount : 1;
+      playlistTimeEl.textContent = `Playlist: ${totalLabel} · Loop: ${loopLabel}`;
+    }
+    
+    function loadTrackDuration(track) {
+      return new Promise(resolve => {
+        if (!track || !track.url) return resolve();
+        const probe = new Audio();
+        probe.preload = 'metadata';
+        probe.src = track.url;
+        const cleanup = () => {
+          probe.removeAttribute('src');
+          probe.load();
+        };
+        probe.addEventListener('loadedmetadata', () => {
+          track.duration = probe.duration;
+          cleanup();
+          resolve();
+        }, { once: true });
+        probe.addEventListener('error', () => {
+          track.duration = 0;
+          cleanup();
+          resolve();
+        }, { once: true });
+      });
+    }
+    
+    async function refreshPlaylistDurations() {
+      if (!tracks.length) {
+        updatePlaylistStats();
+        return;
+      }
+      const scanId = ++durationScanId;
+      updatePlaylistStats();
+      for (const track of tracks) {
+        if (scanId !== durationScanId) return;
+        if (isFinite(track.duration)) continue;
+        await loadTrackDuration(track);
+        updatePlaylistStats();
+      }
     }
     
     function getColor(i, total, intensity = 1) {
@@ -1185,6 +1274,11 @@
         bufferLength = analyser.frequencyBinCount;
         dataArray = new Uint8Array(bufferLength);
         timeArray = new Uint8Array(bufferLength);
+        analyserConnected = false;
+      }
+      if (!analyserConnected) {
+        analyser.connect(audioContext.destination);
+        analyserConnected = true;
       }
     }
     
@@ -1217,7 +1311,6 @@
       initAudio();
       source = audioContext.createMediaElementSource(audio);
       source.connect(analyser);
-      analyser.connect(audioContext.destination);
       
       document.getElementById('trackName').textContent = track.name;
       document.getElementById('dropZone').classList.add('has-audio');
@@ -1228,13 +1321,7 @@
           pause();
           return;
         }
-        const nextIndex = currentTrackIndex === -1 ? 0 : currentTrackIndex + 1;
-        if (nextIndex < tracks.length) {
-          loadTrack(nextIndex);
-          play();
-        } else {
-          pause();
-        }
+        playNextTrack({ auto: true });
       });
       
       updatePlaylist();
@@ -1255,12 +1342,23 @@
       document.getElementById('playIcon').innerHTML = '<polygon points="5,3 19,12 5,21"/>';
     }
     
-    function playNextTrack() {
+    function playNextTrack(options = {}) {
       if (!tracks.length) return;
+      const auto = options.auto === true;
       const nextIndex = currentTrackIndex === -1 ? 0 : currentTrackIndex + 1;
       if (nextIndex < tracks.length) {
         loadTrack(nextIndex);
         play();
+        return;
+      }
+      if (loopAll) {
+        playlistLoopCount = Math.max(1, playlistLoopCount);
+        if (auto) playlistLoopCount += 1;
+        loadTrack(0);
+        play();
+        updatePlaylistStats();
+      } else {
+        pause();
       }
     }
     
@@ -1269,6 +1367,11 @@
       const prevIndex = currentTrackIndex === -1 ? 0 : currentTrackIndex - 1;
       if (prevIndex >= 0) {
         loadTrack(prevIndex);
+        play();
+        return;
+      }
+      if (loopAll) {
+        loadTrack(tracks.length - 1);
         play();
       }
     }
@@ -1297,6 +1400,7 @@
         item.onclick = () => { loadTrack(i); play(); };
         container.appendChild(item);
       });
+      updatePlaylistStats();
     }
     
     function appendTracksFromFiles(files, sourceLabel = 'Files') {
@@ -1325,6 +1429,11 @@
         updatePlaylist();
         if (!audio) loadTrack(0);
       }
+      
+      if (playlistLoopCount === 0 && tracks.length) {
+        playlistLoopCount = 1;
+      }
+      refreshPlaylistDurations();
       
       const metaLabel = lastFolderLabel ? `${lastFolderLabel} + ${sourceLabel}` : sourceLabel;
       setPlaylistMeta(metaLabel);
@@ -1367,6 +1476,12 @@
       document.getElementById('playlist').classList.remove('hidden');
       updatePlaylist();
       if (!audio && tracks.length) loadTrack(0);
+      if (tracks.length) {
+        playlistLoopCount = 1;
+      } else {
+        playlistLoopCount = 0;
+      }
+      refreshPlaylistDurations();
       
       lastFolderLabel = sourceLabel;
       setPlaylistMeta(sourceLabel);
@@ -1408,8 +1523,11 @@
             showError('Could not access that folder.');
           }
         }
-      } else {
+      } else if (supportsDirInput) {
         document.getElementById('dirInput').click();
+      } else {
+        document.getElementById('fileInput').click();
+        showError('Folder picking not supported in this browser. Select files instead.');
       }
     }
     
@@ -1431,11 +1549,7 @@
         return;
       }
       
-      if (supportsDirectoryPicker) {
-        await chooseFolder();
-      } else {
-        document.getElementById('dirInput').click();
-      }
+      await chooseFolder();
     }
     
     // ==================== EVENT HANDLERS ====================
@@ -1448,7 +1562,7 @@
     document.body.addEventListener('click', e => {
       if (!tracks.length && (e.target === document.body || e.target === canvas || 
           e.target.closest('.drop-zone'))) {
-        document.getElementById('fileInput').click();
+        chooseFolder();
       }
     });
     
@@ -1466,6 +1580,7 @@
     document.getElementById('playBtn').onclick = () => isPlaying ? pause() : play();
     document.getElementById('folderBtn').onclick = () => chooseFolder();
     document.getElementById('rescanBtn').onclick = () => rescanLibrary();
+    document.getElementById('helpBtn').onclick = () => window.open('help.html', '_blank');
     
     document.getElementById('progressBar').onclick = e => {
       if (!audio || !isFinite(audio.duration)) return;
@@ -1484,20 +1599,14 @@
     // Auto-hide controls
     function showControls() {
       document.getElementById('controls').classList.remove('hidden');
-      document.getElementById('fullscreenBtn').classList.remove('hidden');
-      document.getElementById('colorBtn').classList.remove('hidden');
-      document.getElementById('rescanBtn').classList.remove('hidden');
-      document.getElementById('folderBtn').classList.remove('hidden');
+      document.getElementById('topActions').classList.remove('hidden');
       document.getElementById('playlist').classList.remove('hidden');
       document.getElementById('shortcutsHint').classList.remove('hidden');
       clearTimeout(hideTimeout);
       hideTimeout = setTimeout(() => {
         if (isPlaying) {
           document.getElementById('controls').classList.add('hidden');
-          document.getElementById('fullscreenBtn').classList.add('hidden');
-          document.getElementById('colorBtn').classList.add('hidden');
-          document.getElementById('rescanBtn').classList.add('hidden');
-          document.getElementById('folderBtn').classList.add('hidden');
+          document.getElementById('topActions').classList.add('hidden');
           document.getElementById('playlist').classList.add('hidden');
           document.getElementById('shortcutsHint').classList.add('hidden');
         }
@@ -1537,6 +1646,9 @@
           break;
         case 'KeyR':
           rescanLibrary();
+          break;
+        case 'KeyH':
+          window.open('help.html', '_blank');
           break;
       }
     });
