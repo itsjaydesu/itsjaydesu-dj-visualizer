@@ -300,6 +300,95 @@
     }
     
     .shortcuts-hint.hidden { opacity: 0; }
+    
+    .help-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 30px 20px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+      z-index: 200;
+    }
+    
+    .help-overlay.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    
+    .help-card {
+      max-width: 860px;
+      width: 100%;
+      background: rgba(10,10,10,0.95);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 24px 26px;
+      box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+    }
+    
+    .help-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    
+    .help-title {
+      font-size: 24px;
+      font-weight: 600;
+    }
+    
+    .help-close {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 6px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    
+    .help-columns {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    
+    .help-column {
+      flex: 1;
+      min-width: 240px;
+    }
+    
+    .help-section-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      opacity: 0.6;
+      margin-bottom: 8px;
+    }
+    
+    .help-list {
+      list-style: none;
+      line-height: 1.8;
+      font-size: 13px;
+      opacity: 0.9;
+    }
+    
+    .help-key {
+      display: inline-block;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.2);
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 11px;
+      margin-right: 6px;
+    }
   </style>
 </head>
 <body>
@@ -314,6 +403,62 @@
   
   <div class="mode-display" id="modeDisplay"></div>
   <div class="error-toast" id="errorToast"></div>
+  <div class="help-overlay" id="helpOverlay">
+    <div class="help-card">
+      <div class="help-header">
+        <div class="help-title">Help / ヘルプ</div>
+        <button class="help-close" id="helpClose">Close [Esc]</button>
+      </div>
+      <div class="help-columns">
+        <div class="help-column">
+          <div class="help-section-title">English</div>
+          <ul class="help-list">
+            <li><span class="help-key">O</span> Choose a music folder.</li>
+            <li><span class="help-key">R</span> Rescan after adding files.</li>
+            <li>Drag and drop files to add extra tracks.</li>
+            <li>AIFF playback works best in Safari.</li>
+            <li>Total playlist time + loop count show in the player.</li>
+          </ul>
+        </div>
+        <div class="help-column">
+          <div class="help-section-title">Shortcuts</div>
+          <ul class="help-list">
+            <li><span class="help-key">Space</span> Play / Pause</li>
+            <li><span class="help-key">← / →</span> Previous / Next</li>
+            <li><span class="help-key">1-9, 0</span> Visual modes</li>
+            <li><span class="help-key">C</span> Color scheme</li>
+            <li><span class="help-key">O</span> Folder picker</li>
+            <li><span class="help-key">R</span> Rescan folder</li>
+            <li><span class="help-key">H</span> Toggle help</li>
+            <li><span class="help-key">F</span> Fullscreen</li>
+          </ul>
+        </div>
+        <div class="help-column">
+          <div class="help-section-title">日本語</div>
+          <ul class="help-list">
+            <li><span class="help-key">O</span> でフォルダを選択。</li>
+            <li><span class="help-key">R</span> で再スキャン（曲追加後）。</li>
+            <li>ドラッグ＆ドロップで曲を追加。</li>
+            <li>AIFF は Safari 推奨。</li>
+            <li>合計時間とループ回数が表示されます。</li>
+          </ul>
+        </div>
+        <div class="help-column">
+          <div class="help-section-title">ショートカット</div>
+          <ul class="help-list">
+            <li><span class="help-key">Space</span> 再生 / 停止</li>
+            <li><span class="help-key">← / →</span> 前 / 次</li>
+            <li><span class="help-key">1-9, 0</span> ビジュアル切替</li>
+            <li><span class="help-key">C</span> カラースキーム</li>
+            <li><span class="help-key">O</span> フォルダ選択</li>
+            <li><span class="help-key">R</span> 再スキャン</li>
+            <li><span class="help-key">H</span> ヘルプ</li>
+            <li><span class="help-key">F</span> フルスクリーン</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
   
   <div class="playlist hidden" id="playlist">
     <div class="playlist-title">Playlist</div>
@@ -425,6 +570,43 @@
     
     function trackNameFromFile(file) {
       return file.name.replace(/\.[^.]+$/, '');
+    }
+    
+    function makeTrackIdFromUrl(url) {
+      return `url::${url}`;
+    }
+    
+    function trackNameFromUrl(url) {
+      try {
+        const parsed = new URL(url, window.location.href);
+        const pathname = parsed.pathname;
+        const filename = pathname.split('/').pop() || 'Track';
+        return decodeURIComponent(filename).replace(/\.[^.]+$/, '');
+      } catch (err) {
+        const fallback = url.split('/').pop() || 'Track';
+        return fallback.replace(/\.[^.]+$/, '');
+      }
+    }
+    
+    function buildTrackFromFile(file) {
+      return {
+        id: makeTrackId(file),
+        name: trackNameFromFile(file),
+        url: URL.createObjectURL(file),
+        file,
+        isObjectUrl: true,
+        duration: NaN
+      };
+    }
+    
+    function buildTrackFromUrl(url) {
+      return {
+        id: makeTrackIdFromUrl(url),
+        name: trackNameFromUrl(url),
+        url,
+        isObjectUrl: false,
+        duration: NaN
+      };
     }
     
     function openHandleDB() {
@@ -1265,6 +1447,16 @@
       setTimeout(() => display.classList.remove('show'), 800);
     }
     
+    function toggleHelp(show = null) {
+      const overlay = document.getElementById('helpOverlay');
+      if (!overlay) return;
+      if (show === null) {
+        overlay.classList.toggle('show');
+      } else {
+        overlay.classList.toggle('show', show);
+      }
+    }
+    
     // ==================== AUDIO ====================
     function initAudio() {
       if (!audioContext) {
@@ -1412,15 +1604,10 @@
       
       const existingIds = new Set(tracks.map(t => t.id));
       audioFiles.forEach(file => {
-        const id = makeTrackId(file);
-        if (existingIds.has(id)) return;
-        tracks.push({
-          id,
-          name: trackNameFromFile(file),
-          url: URL.createObjectURL(file),
-          file
-        });
-        existingIds.add(id);
+        const track = buildTrackFromFile(file);
+        if (existingIds.has(track.id)) return;
+        tracks.push(track);
+        existingIds.add(track.id);
       });
       
       if (tracks.length > 0) {
@@ -1457,25 +1644,26 @@
           existing.file = file;
           nextTracks.push(existing);
         } else {
-          nextTracks.push({
-            id,
-            name: trackNameFromFile(file),
-            url: URL.createObjectURL(file),
-            file
-          });
+          nextTracks.push(buildTrackFromFile(file));
         }
       });
       
       const nextIds = new Set(nextTracks.map(t => t.id));
       tracks.forEach(t => {
-        if (!nextIds.has(t.id)) URL.revokeObjectURL(t.url);
+        if (!nextIds.has(t.id) && t.isObjectUrl) URL.revokeObjectURL(t.url);
       });
       
+      const wasPlaying = isPlaying;
       tracks = nextTracks;
       syncCurrentTrackIndex();
       document.getElementById('playlist').classList.remove('hidden');
       updatePlaylist();
-      if (!audio && tracks.length) loadTrack(0);
+      if (!audio && tracks.length) {
+        loadTrack(0);
+      } else if (wasPlaying && currentTrackIndex === -1 && tracks.length) {
+        loadTrack(0);
+        play();
+      }
       if (tracks.length) {
         playlistLoopCount = 1;
       } else {
@@ -1487,11 +1675,103 @@
       setPlaylistMeta(sourceLabel);
     }
     
+    function replaceTracksFromUrls(urls, sourceLabel = 'Current Folder') {
+      if (!urls || urls.length === 0) {
+        showError('No audio files found in this folder.');
+        return false;
+      }
+      
+      const unique = Array.from(new Set(urls));
+      const oldById = new Map(tracks.map(t => [t.id, t]));
+      const nextTracks = unique.map(url => {
+        const id = makeTrackIdFromUrl(url);
+        const existing = oldById.get(id);
+        if (existing) return existing;
+        return buildTrackFromUrl(url);
+      });
+      
+      const nextIds = new Set(nextTracks.map(t => t.id));
+      tracks.forEach(t => {
+        if (!nextIds.has(t.id) && t.isObjectUrl) URL.revokeObjectURL(t.url);
+      });
+      
+      const wasPlaying = isPlaying;
+      tracks = nextTracks;
+      syncCurrentTrackIndex();
+      document.getElementById('playlist').classList.remove('hidden');
+      updatePlaylist();
+      
+      if (!audio && tracks.length) {
+        loadTrack(0);
+      } else if (wasPlaying && currentTrackIndex === -1 && tracks.length) {
+        loadTrack(0);
+        play();
+      }
+      
+      if (tracks.length) {
+        playlistLoopCount = 1;
+      } else {
+        playlistLoopCount = 0;
+      }
+      refreshPlaylistDurations();
+      
+      lastFolderLabel = sourceLabel;
+      setPlaylistMeta(sourceLabel);
+      return true;
+    }
+    
     function getFolderLabelFromFiles(files) {
       const first = files && files[0];
       if (!first || !first.webkitRelativePath) return 'Folder';
       const parts = first.webkitRelativePath.split('/');
       return parts[0] || 'Folder';
+    }
+    
+    function getCurrentFolderLabel() {
+      const path = decodeURIComponent(window.location.pathname || '');
+      const parts = path.split('/').filter(Boolean);
+      if (parts.length === 0) return 'Current Folder';
+      const last = parts[parts.length - 1];
+      if (last.includes('.')) {
+        return parts[parts.length - 2] || 'Current Folder';
+      }
+      return last || 'Current Folder';
+    }
+    
+    function extractAudioUrlsFromListing(html, baseUrl) {
+      const links = new Set();
+      const hrefRegex = /href\s*=\s*["']([^"']+)["']/gi;
+      let match;
+      while ((match = hrefRegex.exec(html))) {
+        const href = match[1];
+        if (!href || href.startsWith('?') || href.startsWith('#')) continue;
+        if (href.toLowerCase().startsWith('javascript:')) continue;
+        let url;
+        try {
+          url = new URL(href, baseUrl);
+        } catch (err) {
+          continue;
+        }
+        if (url.pathname.endsWith('/')) continue;
+        if (!AUDIO_FILE_REGEX.test(url.pathname)) continue;
+        links.add(url.href);
+      }
+      return Array.from(links);
+    }
+    
+    async function autoDetectFromDirectoryListing() {
+      const baseUrl = window.location.href.replace(/[#?].*$/, '');
+      try {
+        const response = await fetch('./', { cache: 'no-store' });
+        if (!response.ok) return false;
+        const text = await response.text();
+        const urls = extractAudioUrlsFromListing(text, baseUrl);
+        if (!urls.length) return false;
+        const label = getCurrentFolderLabel();
+        return replaceTracksFromUrls(urls, label);
+      } catch (err) {
+        return false;
+      }
     }
     
     async function scanDirectoryHandle(handle) {
@@ -1549,7 +1829,10 @@
         return;
       }
       
-      await chooseFolder();
+      const autoFound = await autoDetectFromDirectoryListing();
+      if (!autoFound) {
+        await chooseFolder();
+      }
     }
     
     // ==================== EVENT HANDLERS ====================
@@ -1580,7 +1863,11 @@
     document.getElementById('playBtn').onclick = () => isPlaying ? pause() : play();
     document.getElementById('folderBtn').onclick = () => chooseFolder();
     document.getElementById('rescanBtn').onclick = () => rescanLibrary();
-    document.getElementById('helpBtn').onclick = () => window.open('help.html', '_blank');
+    document.getElementById('helpBtn').onclick = () => toggleHelp();
+    document.getElementById('helpClose').onclick = () => toggleHelp(false);
+    document.getElementById('helpOverlay').addEventListener('click', e => {
+      if (e.target.id === 'helpOverlay') toggleHelp(false);
+    });
     
     document.getElementById('progressBar').onclick = e => {
       if (!audio || !isFinite(audio.duration)) return;
@@ -1648,20 +1935,30 @@
           rescanLibrary();
           break;
         case 'KeyH':
-          window.open('help.html', '_blank');
+          toggleHelp();
+          break;
+        case 'Escape':
+          toggleHelp(false);
           break;
       }
     });
     
     // ==================== AUTO-LOAD SAVED FOLDER ====================
     async function autoLoadSavedFolder() {
-      if (!supportsDirectoryPicker) return;
-      const handle = await loadDirectoryHandle();
-      if (!handle) return;
-      const perm = await handle.queryPermission({ mode: 'read' });
-      if (perm === 'granted') {
-        directoryHandle = handle;
-        await scanDirectoryHandle(handle);
+      let loaded = false;
+      if (supportsDirectoryPicker) {
+        const handle = await loadDirectoryHandle();
+        if (handle) {
+          const perm = await handle.queryPermission({ mode: 'read' });
+          if (perm === 'granted') {
+            directoryHandle = handle;
+            await scanDirectoryHandle(handle);
+            loaded = true;
+          }
+        }
+      }
+      if (!loaded) {
+        await autoDetectFromDirectoryListing();
       }
     }
     

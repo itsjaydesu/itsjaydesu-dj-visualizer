@@ -8,7 +8,7 @@ A tiny, fun, full-screen music visualizer for local files.
 3. Press `R` to rescan after you add more files.
 4. Drag and drop files to add tracks without changing the folder.
 5. See total playlist time and the current loop count in the player.
-6. Press `H` (or open `help.html`) for the help page.
+6. Press `H` for the in-app help overlay.
 
 Shortcuts: `Space` play/pause, `←/→` previous/next, `1-9,0` visuals, `C` colors, `O` folder, `R` rescan, `H` help, `F` fullscreen.
 
@@ -18,6 +18,6 @@ Shortcuts: `Space` play/pause, `←/→` previous/next, `1-9,0` visuals, `C` col
 3. 追加で曲をコピーしたら `R` で再スキャン。
 4. ドラッグ＆ドロップで曲を追加できます。
 5. プレイリストの合計時間とループ回数が表示されます。
-6. `H` か `help.html` でヘルプを開けます。
+6. `H` でヘルプを開けます。
 
 ショートカット: `Space` 再生/停止, `←/→` 前/次, `1-9,0` ビジュアル, `C` 色, `O` フォルダ, `R` 再スキャン, `H` ヘルプ, `F` フルスクリーン。
