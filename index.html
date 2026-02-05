@@ -1691,7 +1691,6 @@
       const hint = document.getElementById('startHint');
       const playBtn = document.getElementById('startPlayBtn');
       const folderBtn = document.getElementById('startFolderBtn');
-      const note = document.getElementById('startNote');
       if (!hint) return;
       if (!tracks.length) {
         hint.textContent = 'Choose a folder, then hit Play to unlock audio.';
@@ -1701,13 +1700,6 @@
         hint.textContent = 'Click Play to unlock audio and start.';
         if (playBtn) playBtn.disabled = false;
         if (folderBtn) folderBtn.textContent = 'Change Folder';
-      }
-      if (note) {
-        if (browserInfo.isSafari) {
-          note.textContent = 'Safari detected. AIFF should play here.';
-        } else {
-          note.textContent = `${browserInfo.name} detected. AIFF may not play; MP3/WAV is safest.`;
-        }
       }
     }
     
@@ -2250,7 +2242,6 @@
     
     async function autoDetectFromDirectoryListing() {
       if (window.location.protocol === 'file:') {
-        showInfo('Auto-detect is blocked on file://. Press O to choose a folder.');
         return false;
       }
       const baseUrl = window.location.href.replace(/[#?].*$/, '');
@@ -2259,14 +2250,10 @@
         if (!response.ok) return false;
         const text = await response.text();
         const urls = extractAudioUrlsFromListing(text, baseUrl);
-        if (!urls.length) {
-          showWarn('No audio files found in directory listing.');
-          return false;
-        }
+        if (!urls.length) return false;
         const label = getCurrentFolderLabel();
         return replaceTracksFromUrls(urls, label);
       } catch (err) {
-        showWarn('Could not read the directory listing. Use O to choose a folder.');
         return false;
       }
     }
