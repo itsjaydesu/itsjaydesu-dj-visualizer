@@ -275,7 +275,7 @@
       top: 20px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(220, 38, 38, 0.9);
+      background: rgba(220, 38, 38, 0.92);
       padding: 15px 25px;
       border-radius: 10px;
       z-index: 200;
@@ -286,6 +286,8 @@
     }
     
     .error-toast.show { opacity: 1; }
+    .error-toast.info { background: rgba(59, 130, 246, 0.92); }
+    .error-toast.warn { background: rgba(234, 179, 8, 0.92); }
     
     .shortcuts-hint {
       position: fixed;
@@ -588,6 +590,11 @@
       }
     }
     
+    function getExtension(input) {
+      const match = /\\.([a-z0-9]+)$/i.exec(input || '');
+      return match ? match[1].toLowerCase() : '';
+    }
+    
     function buildTrackFromFile(file) {
       return {
         id: makeTrackId(file),
@@ -595,7 +602,8 @@
         url: URL.createObjectURL(file),
         file,
         isObjectUrl: true,
-        duration: NaN
+        duration: NaN,
+        extension: getExtension(file.name)
       };
     }
     
@@ -605,7 +613,8 @@
         name: trackNameFromUrl(url),
         url,
         isObjectUrl: false,
-        duration: NaN
+        duration: NaN,
+        extension: getExtension(url)
       };
     }
     
@@ -1474,11 +1483,47 @@
       }
     }
     
-    function showError(msg) {
+    function showToast(msg, type = 'error') {
       const toast = document.getElementById('errorToast');
       toast.textContent = msg;
+      toast.classList.remove('info', 'warn');
+      if (type === 'info') toast.classList.add('info');
+      if (type === 'warn') toast.classList.add('warn');
       toast.classList.add('show');
       setTimeout(() => toast.classList.remove('show'), 5000);
+    }
+    
+    function showError(msg) {
+      showToast(msg, 'error');
+    }
+    
+    function showInfo(msg) {
+      showToast(msg, 'info');
+    }
+    
+    function showWarn(msg) {
+      showToast(msg, 'warn');
+    }
+    
+    function describeAudioError(track, error) {
+      const code = error ? error.code : null;
+      const ext = track && track.extension ? track.extension : '';
+      const base = track ? `"${track.name}"` : 'This track';
+      switch (code) {
+        case 1:
+          return `${base} playback was aborted.`;
+        case 2:
+          return `${base} could not be loaded (network or file error).`;
+        case 3:
+          return `${base} could not be decoded. Try Safari for AIFF or convert to WAV/MP3.`;
+        case 4:
+          return `${base} is not supported in this browser.`;
+        default:
+          if (ext === 'aif' || ext === 'aiff') {
+            return `${base} is AIFF. Use Safari or convert to WAV/MP3.`;
+          }
+          return `${base} could not be played.`;
+      }
     }
     
     function loadTrack(index) {
@@ -1496,9 +1541,13 @@
       audio = new Audio();
       audio.src = track.url;
       
+      showInfo(`Loading: ${track.name}`);
       audio.addEventListener('error', () => {
-        showError('Cannot play this format. AIFF requires Safari.');
+        showError(describeAudioError(track, audio.error));
       });
+      audio.addEventListener('canplay', () => {
+        showInfo(`Ready: ${track.name}`);
+      }, { once: true });
       
       initAudio();
       source = audioContext.createMediaElementSource(audio);
@@ -1519,19 +1568,50 @@
       updatePlaylist();
     }
     
+    function updatePlayIcon(playing) {
+      document.getElementById('playIcon').innerHTML = playing
+        ? '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>'
+        : '<polygon points="5,3 19,12 5,21"/>';
+    }
+    
     function play() {
-      if (!audio) return;
-      audioContext.resume();
-      audio.play();
-      isPlaying = true;
-      document.getElementById('playIcon').innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+      if (!audio) {
+        showWarn('No track loaded. Choose a folder first.');
+        return;
+      }
+      initAudio();
+      const resumePromise = audioContext.resume();
+      if (resumePromise && resumePromise.catch) {
+        resumePromise.catch(() => {
+          showWarn('Audio context is blocked. Click the page to enable sound.');
+        });
+      }
+      
+      const playPromise = audio.play();
+      if (playPromise && playPromise.then) {
+        playPromise.then(() => {
+          isPlaying = true;
+          updatePlayIcon(true);
+        }).catch(err => {
+          isPlaying = false;
+          updatePlayIcon(false);
+          if (err && err.name === 'NotAllowedError') {
+            showWarn('Playback blocked. Click anywhere or press Space to start.');
+          } else {
+            showError('Playback failed. Try another track or browser.');
+          }
+        });
+      } else {
+        isPlaying = true;
+        updatePlayIcon(true);
+      }
     }
     
     function pause() {
       if (!audio) return;
       audio.pause();
       isPlaying = false;
-      document.getElementById('playIcon').innerHTML = '<polygon points="5,3 19,12 5,21"/>';
+      updatePlayIcon(false);
     }
     
     function playNextTrack(options = {}) {
@@ -1598,7 +1678,7 @@
     function appendTracksFromFiles(files, sourceLabel = 'Files') {
       const audioFiles = Array.from(files).filter(isAudioFile);
       if (audioFiles.length === 0) {
-        showError('No audio files found.');
+        showWarn('No audio files found.');
         return;
       }
       
@@ -1616,6 +1696,7 @@
         updatePlaylist();
         if (!audio) loadTrack(0);
       }
+      showInfo(`Added ${audioFiles.length} track${audioFiles.length === 1 ? '' : 's'}.`);
       
       if (playlistLoopCount === 0 && tracks.length) {
         playlistLoopCount = 1;
@@ -1629,7 +1710,7 @@
     function replaceTracksFromFiles(files, sourceLabel = 'Folder') {
       const audioFiles = Array.from(files).filter(isAudioFile);
       if (audioFiles.length === 0) {
-        showError('No audio files found.');
+        showWarn('No audio files found in this folder.');
         return;
       }
       
@@ -1673,11 +1754,12 @@
       
       lastFolderLabel = sourceLabel;
       setPlaylistMeta(sourceLabel);
+      showInfo(`Loaded ${tracks.length} track${tracks.length === 1 ? '' : 's'} from ${sourceLabel}.`);
     }
     
     function replaceTracksFromUrls(urls, sourceLabel = 'Current Folder') {
       if (!urls || urls.length === 0) {
-        showError('No audio files found in this folder.');
+        showWarn('No audio files found in this folder.');
         return false;
       }
       
@@ -1717,6 +1799,7 @@
       
       lastFolderLabel = sourceLabel;
       setPlaylistMeta(sourceLabel);
+      showInfo(`Loaded ${tracks.length} track${tracks.length === 1 ? '' : 's'} from ${sourceLabel}.`);
       return true;
     }
     
@@ -1760,16 +1843,24 @@
     }
     
     async function autoDetectFromDirectoryListing() {
+      if (window.location.protocol === 'file:') {
+        showInfo('Auto-detect is blocked on file://. Press O to choose a folder.');
+        return false;
+      }
       const baseUrl = window.location.href.replace(/[#?].*$/, '');
       try {
         const response = await fetch('./', { cache: 'no-store' });
         if (!response.ok) return false;
         const text = await response.text();
         const urls = extractAudioUrlsFromListing(text, baseUrl);
-        if (!urls.length) return false;
+        if (!urls.length) {
+          showWarn('No audio files found in directory listing.');
+          return false;
+        }
         const label = getCurrentFolderLabel();
         return replaceTracksFromUrls(urls, label);
       } catch (err) {
+        showWarn('Could not read the directory listing. Use O to choose a folder.');
         return false;
       }
     }
@@ -1784,7 +1875,7 @@
       }
       
       if (files.length === 0) {
-        showError('No audio files found in this folder.');
+        showWarn('No audio files found in this folder.');
         return;
       }
       
@@ -1856,7 +1947,16 @@
     
     document.getElementById('dirInput').addEventListener('change', e => {
       const label = getFolderLabelFromFiles(e.target.files);
-      replaceTracksFromFiles(e.target.files, label);
+      const files = Array.from(e.target.files);
+      const topLevelFiles = files.filter(file => {
+        const rel = file.webkitRelativePath || '';
+        const depth = rel.split('/').filter(Boolean).length;
+        return depth <= 2;
+      });
+      if (topLevelFiles.length !== files.length) {
+        showInfo('Ignoring subfolders. Only top-level files are loaded.');
+      }
+      replaceTracksFromFiles(topLevelFiles, label);
       e.target.value = '';
     });
     
