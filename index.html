@@ -321,7 +321,7 @@
       justify-content: center;
       flex-direction: column;
       gap: 12px;
-      background: radial-gradient(circle at center, rgba(0,0,0,0.4), rgba(0,0,0,0.9));
+      background: radial-gradient(circle at center, rgba(5,5,10,0.35), rgba(0,0,0,0.95));
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.25s ease;
@@ -332,22 +332,87 @@
       pointer-events: auto;
     }
     
+    .start-card {
+      max-width: 640px;
+      width: min(92vw, 640px);
+      background: rgba(10, 10, 15, 0.92);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 20px;
+      padding: 26px 28px;
+      text-align: center;
+      box-shadow: 0 40px 120px rgba(0,0,0,0.55);
+    }
+    
+    .start-title {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    
+    .start-subtitle {
+      font-size: 15px;
+      opacity: 0.75;
+      line-height: 1.6;
+      margin-bottom: 18px;
+    }
+    
+    .start-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    
     .start-btn {
-      font-size: 28px;
-      padding: 18px 36px;
+      font-size: 18px;
+      padding: 14px 24px;
       border-radius: 999px;
       border: none;
       color: #fff;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       cursor: pointer;
-      box-shadow: 0 20px 60px rgba(102,126,234,0.4);
+      box-shadow: 0 16px 40px rgba(102,126,234,0.35);
     }
     
-    .start-hint {
-      font-size: 14px;
-      opacity: 0.75;
-      text-align: center;
-      max-width: 320px;
+    .start-btn.secondary {
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.2);
+      box-shadow: none;
+    }
+    
+    .start-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    
+    .start-note {
+      font-size: 13px;
+      opacity: 0.65;
+      line-height: 1.6;
+    }
+    
+    .diagnostics {
+      text-align: left;
+      margin-top: 14px;
+      font-size: 12px;
+      opacity: 0.85;
+    }
+    
+    .diagnostics summary {
+      cursor: pointer;
+      margin-bottom: 6px;
+    }
+    
+    .diagnostics pre {
+      white-space: pre-wrap;
+      background: rgba(0,0,0,0.35);
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       line-height: 1.5;
     }
     
@@ -454,8 +519,19 @@
   <div class="mode-display" id="modeDisplay"></div>
   <div class="error-toast" id="errorToast"></div>
   <div class="start-overlay show" id="startOverlay">
-    <button class="start-btn" id="startBtn">▶ Start Audio</button>
-    <div class="start-hint" id="startHint">Click to unlock audio and play.</div>
+    <div class="start-card">
+      <div class="start-title">DJ Visualizer</div>
+      <div class="start-subtitle" id="startHint">Choose a folder, then hit Play to unlock audio.</div>
+      <div class="start-actions">
+        <button class="start-btn secondary" id="startFolderBtn">Choose Folder</button>
+        <button class="start-btn" id="startPlayBtn" disabled>Play</button>
+      </div>
+      <div class="start-note">Tip: AIFF playback works best in Safari.</div>
+      <details class="diagnostics" id="diagnosticsBox">
+        <summary>Diagnostics</summary>
+        <pre id="diagnosticsText">No diagnostics yet.</pre>
+      </details>
+    </div>
   </div>
   <div class="help-overlay" id="helpOverlay">
     <div class="help-card">
@@ -1537,12 +1613,75 @@
     
     function updateStartOverlay() {
       const hint = document.getElementById('startHint');
+      const playBtn = document.getElementById('startPlayBtn');
+      const folderBtn = document.getElementById('startFolderBtn');
       if (!hint) return;
       if (!tracks.length) {
-        hint.textContent = 'Click to choose a folder and unlock audio.';
+        hint.textContent = 'Choose a folder, then hit Play to unlock audio.';
+        if (playBtn) playBtn.disabled = true;
+        if (folderBtn) folderBtn.textContent = 'Choose Folder';
       } else {
-        hint.textContent = 'Click to unlock audio and play.';
+        hint.textContent = 'Click Play to unlock audio and start.';
+        if (playBtn) playBtn.disabled = false;
+        if (folderBtn) folderBtn.textContent = 'Change Folder';
       }
+    }
+    
+    function readyStateLabel(state) {
+      return {
+        0: 'HAVE_NOTHING',
+        1: 'HAVE_METADATA',
+        2: 'HAVE_CURRENT_DATA',
+        3: 'HAVE_FUTURE_DATA',
+        4: 'HAVE_ENOUGH_DATA'
+      }[state] || `UNKNOWN(${state})`;
+    }
+    
+    function networkStateLabel(state) {
+      return {
+        0: 'NETWORK_EMPTY',
+        1: 'NETWORK_IDLE',
+        2: 'NETWORK_LOADING',
+        3: 'NETWORK_NO_SOURCE'
+      }[state] || `UNKNOWN(${state})`;
+    }
+    
+    function updateDiagnostics(reason = 'status') {
+      const box = document.getElementById('diagnosticsText');
+      if (!box) return;
+      const track = tracks[currentTrackIndex];
+      const audioState = audio ? {
+        src: audio.src,
+        paused: audio.paused,
+        muted: audio.muted,
+        volume: audio.volume,
+        currentTime: audio.currentTime,
+        duration: audio.duration,
+        readyState: readyStateLabel(audio.readyState),
+        networkState: networkStateLabel(audio.networkState),
+        error: audio.error ? audio.error.code : 'none'
+      } : null;
+      const contextState = audioContext ? audioContext.state : 'none';
+      const sampleRate = audioContext ? audioContext.sampleRate : '-';
+      const diagnostics = [
+        `Reason: ${reason}`,
+        `Protocol: ${window.location.protocol}`,
+        `User Agent: ${navigator.userAgent}`,
+        `Context: ${contextState} (${sampleRate} Hz)`,
+        `Track: ${track ? track.name : 'none'}`,
+        `Track Extension: ${track ? track.extension : 'n/a'}`,
+        `Tracks Loaded: ${tracks.length}`,
+        `Audio: ${audioState ? 'present' : 'none'}`,
+        audioState ? `Audio Src: ${audioState.src}` : null,
+        audioState ? `Audio Paused: ${audioState.paused}` : null,
+        audioState ? `Audio Muted: ${audioState.muted}` : null,
+        audioState ? `Audio Volume: ${audioState.volume}` : null,
+        audioState ? `Audio Time: ${audioState.currentTime.toFixed(2)} / ${isFinite(audioState.duration) ? audioState.duration.toFixed(2) : 'NaN'}` : null,
+        audioState ? `Ready State: ${audioState.readyState}` : null,
+        audioState ? `Network State: ${audioState.networkState}` : null,
+        audioState ? `Audio Error: ${audioState.error}` : null
+      ].filter(Boolean).join('\n');
+      box.textContent = diagnostics;
     }
     
     // ==================== AUDIO ====================
@@ -1575,16 +1714,19 @@
     function showError(msg) {
       showToast(msg, 'error');
       setStatus(msg, 'error');
+      updateDiagnostics('error');
     }
     
     function showInfo(msg) {
       showToast(msg, 'info');
       setStatus(msg, 'info');
+      updateDiagnostics('info');
     }
     
     function showWarn(msg) {
       showToast(msg, 'warn');
       setStatus(msg, 'warn');
+      updateDiagnostics('warn');
     }
     
     function describeAudioError(track, error) {
@@ -1614,6 +1756,7 @@
       currentTrackIndex = index;
       const track = tracks[index];
       currentTrackId = track.id;
+      updateDiagnostics('load track');
       
       if (audio) {
         audio.pause();
@@ -1627,22 +1770,28 @@
       audio.addEventListener('error', () => {
         showError(describeAudioError(track, audio.error));
         showStartOverlay(true);
+        updateDiagnostics('audio error');
       });
       audio.addEventListener('canplay', () => {
         showInfo(`Ready: ${track.name}`);
+        updateDiagnostics('canplay');
       }, { once: true });
       audio.addEventListener('playing', () => {
         setStatus(`Playing: ${track.name}`, 'info');
         showStartOverlay(false);
+        updateDiagnostics('playing');
       });
       audio.addEventListener('pause', () => {
         if (!audio.ended) setStatus(`Paused: ${track.name}`, 'info');
+        updateDiagnostics('pause');
       });
       audio.addEventListener('waiting', () => {
         setStatus(`Buffering: ${track.name}`, 'warn');
+        updateDiagnostics('waiting');
       });
       audio.addEventListener('stalled', () => {
         setStatus(`Stalled: ${track.name}`, 'warn');
+        updateDiagnostics('stalled');
       });
       
       initAudio();
@@ -1691,21 +1840,27 @@
           isPlaying = true;
           updatePlayIcon(true);
           showStartOverlay(false);
+          updateDiagnostics('play success');
         }).catch(err => {
           isPlaying = false;
           updatePlayIcon(false);
           if (err && err.name === 'NotAllowedError') {
             showWarn('Playback blocked. Click anywhere or press Space to start.');
             showStartOverlay(true);
+          } else if (err && err.name === 'NotSupportedError') {
+            showError('Playback failed: format not supported.');
+            showStartOverlay(true);
           } else {
             showError('Playback failed. Try another track or browser.');
             showStartOverlay(true);
           }
+          updateDiagnostics('play failed');
         });
       } else {
         isPlaying = true;
         updatePlayIcon(true);
         showStartOverlay(false);
+        updateDiagnostics('play fallback');
       }
     }
     
@@ -2072,9 +2227,14 @@
     document.getElementById('helpOverlay').addEventListener('click', e => {
       if (e.target.id === 'helpOverlay') toggleHelp(false);
     });
-    document.getElementById('startBtn').onclick = async () => {
+    document.getElementById('startFolderBtn').onclick = async () => {
+      await chooseFolder();
+      updateStartOverlay();
+    };
+    document.getElementById('startPlayBtn').onclick = () => {
       if (!tracks.length) {
-        await chooseFolder();
+        showWarn('Choose a folder first.');
+        return;
       }
       if (!audio && tracks.length) loadTrack(0);
       play();
@@ -2174,6 +2334,7 @@
     }
     
     updateStartOverlay();
+    updateDiagnostics('init');
     autoLoadSavedFolder();
     
     // ==================== ANIMATION LOOP ====================
