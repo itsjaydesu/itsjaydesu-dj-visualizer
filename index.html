@@ -156,7 +156,7 @@
     .drop-text { font-size: 24px; opacity: 0.5; }
     .drop-hint { font-size: 14px; opacity: 0.3; margin-top: 10px; }
     
-    .fullscreen-btn, .color-btn-main {
+    .fullscreen-btn, .color-btn-main, .rescan-btn, .folder-btn {
       position: fixed;
       top: 20px;
       z-index: 100;
@@ -172,14 +172,21 @@
     
     .fullscreen-btn { right: 20px; }
     .color-btn-main { right: 130px; }
+    .rescan-btn { right: 260px; }
+    .folder-btn { right: 390px; }
     
-    .fullscreen-btn:hover, .color-btn-main:hover {
+    .fullscreen-btn:hover, .color-btn-main:hover, .rescan-btn:hover, .folder-btn:hover {
       background: rgba(255,255,255,0.2);
     }
     
-    .fullscreen-btn.hidden, .color-btn-main.hidden {
+    .fullscreen-btn.hidden, .color-btn-main.hidden, .rescan-btn.hidden, .folder-btn.hidden {
       opacity: 0;
       pointer-events: none;
+    }
+    
+    .fullscreen-btn:disabled, .color-btn-main:disabled, .rescan-btn:disabled, .folder-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
     }
     
     .playlist {
@@ -208,6 +215,13 @@
       text-transform: uppercase;
       letter-spacing: 1px;
       opacity: 0.5;
+      margin-bottom: 10px;
+    }
+    
+    .playlist-meta {
+      font-size: 11px;
+      opacity: 0.4;
+      margin-top: -6px;
       margin-bottom: 10px;
     }
     
@@ -283,7 +297,7 @@
   <div class="drop-zone" id="dropZone">
     <div class="drop-icon">🎵</div>
     <div class="drop-text">Drop audio files here</div>
-    <div class="drop-hint">or click anywhere to browse</div>
+    <div class="drop-hint">click anywhere to browse files or press O to choose a folder</div>
     <div class="drop-hint" style="margin-top: 15px; color: #f5af19;">⚠️ AIFF files require Safari</div>
   </div>
   
@@ -292,14 +306,17 @@
   
   <div class="playlist hidden" id="playlist">
     <div class="playlist-title">Playlist</div>
+    <div class="playlist-meta" id="playlistMeta">Source: None</div>
     <div id="playlistItems"></div>
   </div>
   
+  <button class="folder-btn" id="folderBtn">📁 Folder [O]</button>
+  <button class="rescan-btn" id="rescanBtn">↻ Rescan [R]</button>
   <button class="color-btn-main" id="colorBtn">🎨 <span id="colorName">Neon</span> [C]</button>
   <button class="fullscreen-btn" id="fullscreenBtn">⛶ Fullscreen [F]</button>
   
   <div class="shortcuts-hint" id="shortcutsHint">
-    1-9, 0 → visuals | C → colors<br>
+    1-9, 0 → visuals | C → colors | O → folder | R → rescan<br>
     Space → play/pause | ←→ → tracks
   </div>
   
@@ -321,6 +338,7 @@
   </div>
   
   <input type="file" class="file-input" id="fileInput" accept="audio/*" multiple>
+  <input type="file" class="file-input" id="dirInput" webkitdirectory directory multiple>
   
   <script>
     const canvas = document.getElementById('canvas');
@@ -329,11 +347,18 @@
     let audioContext, analyser, source, audio;
     let dataArray, bufferLength, timeArray;
     let tracks = [];
-    let currentTrackIndex = 0;
+    let currentTrackIndex = -1;
+    let currentTrackId = null;
     let isPlaying = false;
     let hideTimeout;
     let particles = [];
     let time = 0;
+    let directoryHandle = null;
+    let lastFolderLabel = '';
+    const supportsDirectoryPicker = 'showDirectoryPicker' in window;
+    const AUDIO_FILE_REGEX = /\.(mp3|wav|aiff|aif|flac|m4a|ogg|aac|alac|wma|opus)$/i;
+    const HANDLE_DB_NAME = 'dj-visualizer';
+    const HANDLE_DB_STORE = 'handles';
     
     // ==================== VISUALIZATIONS ====================
     const visualizations = [
@@ -369,6 +394,72 @@
     let currentColorIndex = 0;
     
     // ==================== HELPER FUNCTIONS ====================
+    function isAudioFile(file) {
+      return file && (file.type.startsWith('audio/') || AUDIO_FILE_REGEX.test(file.name));
+    }
+    
+    function makeTrackId(file) {
+      return `${file.name}::${file.size}::${file.lastModified}`;
+    }
+    
+    function trackNameFromFile(file) {
+      return file.name.replace(/\.[^.]+$/, '');
+    }
+    
+    function openHandleDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(HANDLE_DB_NAME, 1);
+        request.onupgradeneeded = () => {
+          request.result.createObjectStore(HANDLE_DB_STORE);
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+    
+    async function saveDirectoryHandle(handle) {
+      try {
+        const db = await openHandleDB();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(HANDLE_DB_STORE, 'readwrite');
+          tx.objectStore(HANDLE_DB_STORE).put(handle, 'musicDir');
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+      } catch (err) {
+        console.warn('Could not store directory handle', err);
+      }
+    }
+    
+    async function loadDirectoryHandle() {
+      try {
+        const db = await openHandleDB();
+        return await new Promise((resolve, reject) => {
+          const tx = db.transaction(HANDLE_DB_STORE, 'readonly');
+          const request = tx.objectStore(HANDLE_DB_STORE).get('musicDir');
+          request.onsuccess = () => resolve(request.result || null);
+          request.onerror = () => reject(request.error);
+        });
+      } catch (err) {
+        console.warn('Could not load directory handle', err);
+        return null;
+      }
+    }
+    
+    function setPlaylistMeta(text) {
+      const meta = document.getElementById('playlistMeta');
+      if (!meta) return;
+      meta.textContent = text ? `Source: ${text}` : 'Source: None';
+    }
+    
+    function syncCurrentTrackIndex() {
+      if (!currentTrackId) {
+        currentTrackIndex = tracks.length ? 0 : -1;
+        return;
+      }
+      currentTrackIndex = tracks.findIndex(t => t.id === currentTrackId);
+    }
+    
     function getColor(i, total, intensity = 1) {
       const colors = colorSchemes[currentColorIndex].colors;
       const idx = Math.floor((i / total) * colors.length) % colors.length;
@@ -1033,9 +1124,11 @@
     
     // ==================== UI SETUP ====================
     function resize() {
-      canvas.width = window.innerWidth * window.devicePixelRatio;
-      canvas.height = window.innerHeight * window.devicePixelRatio;
-      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * ratio;
+      canvas.height = window.innerHeight * ratio;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(ratio, ratio);
     }
     window.addEventListener('resize', resize);
     resize();
@@ -1107,6 +1200,7 @@
       
       currentTrackIndex = index;
       const track = tracks[index];
+      currentTrackId = track.id;
       
       if (audio) {
         audio.pause();
@@ -1130,8 +1224,13 @@
       
       audio.addEventListener('timeupdate', updateProgress);
       audio.addEventListener('ended', () => {
-        if (currentTrackIndex < tracks.length - 1) {
-          loadTrack(currentTrackIndex + 1);
+        if (!tracks.length) {
+          pause();
+          return;
+        }
+        const nextIndex = currentTrackIndex === -1 ? 0 : currentTrackIndex + 1;
+        if (nextIndex < tracks.length) {
+          loadTrack(nextIndex);
           play();
         } else {
           pause();
@@ -1156,12 +1255,31 @@
       document.getElementById('playIcon').innerHTML = '<polygon points="5,3 19,12 5,21"/>';
     }
     
+    function playNextTrack() {
+      if (!tracks.length) return;
+      const nextIndex = currentTrackIndex === -1 ? 0 : currentTrackIndex + 1;
+      if (nextIndex < tracks.length) {
+        loadTrack(nextIndex);
+        play();
+      }
+    }
+    
+    function playPreviousTrack() {
+      if (!tracks.length) return;
+      const prevIndex = currentTrackIndex === -1 ? 0 : currentTrackIndex - 1;
+      if (prevIndex >= 0) {
+        loadTrack(prevIndex);
+        play();
+      }
+    }
+    
     function updateProgress() {
       if (!audio) return;
-      const progress = (audio.currentTime / audio.duration) * 100;
+      const duration = audio.duration;
+      const progress = duration && isFinite(duration) ? (audio.currentTime / duration) * 100 : 0;
       document.getElementById('progressFill').style.width = progress + '%';
       document.getElementById('trackTime').textContent = 
-        formatTime(audio.currentTime) + ' / ' + formatTime(audio.duration);
+        formatTime(audio.currentTime) + ' / ' + formatTime(duration);
     }
     
     function formatTime(s) {
@@ -1181,22 +1299,142 @@
       });
     }
     
-    function handleFiles(files) {
-      const audioFiles = Array.from(files).filter(f => 
-        f.type.startsWith('audio/') || f.name.match(/\.(mp3|wav|aiff|aif|flac|m4a|ogg)$/i)
-      );
+    function appendTracksFromFiles(files, sourceLabel = 'Files') {
+      const audioFiles = Array.from(files).filter(isAudioFile);
+      if (audioFiles.length === 0) {
+        showError('No audio files found.');
+        return;
+      }
       
+      const existingIds = new Set(tracks.map(t => t.id));
       audioFiles.forEach(file => {
+        const id = makeTrackId(file);
+        if (existingIds.has(id)) return;
         tracks.push({
-          name: file.name.replace(/\.[^.]+$/, ''),
-          url: URL.createObjectURL(file)
+          id,
+          name: trackNameFromFile(file),
+          url: URL.createObjectURL(file),
+          file
         });
+        existingIds.add(id);
       });
       
       if (tracks.length > 0) {
         document.getElementById('playlist').classList.remove('hidden');
+        syncCurrentTrackIndex();
         updatePlaylist();
         if (!audio) loadTrack(0);
+      }
+      
+      const metaLabel = lastFolderLabel ? `${lastFolderLabel} + ${sourceLabel}` : sourceLabel;
+      setPlaylistMeta(metaLabel);
+    }
+    
+    function replaceTracksFromFiles(files, sourceLabel = 'Folder') {
+      const audioFiles = Array.from(files).filter(isAudioFile);
+      if (audioFiles.length === 0) {
+        showError('No audio files found.');
+        return;
+      }
+      
+      audioFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+      const oldById = new Map(tracks.map(t => [t.id, t]));
+      const nextTracks = [];
+      
+      audioFiles.forEach(file => {
+        const id = makeTrackId(file);
+        const existing = oldById.get(id);
+        if (existing) {
+          existing.file = file;
+          nextTracks.push(existing);
+        } else {
+          nextTracks.push({
+            id,
+            name: trackNameFromFile(file),
+            url: URL.createObjectURL(file),
+            file
+          });
+        }
+      });
+      
+      const nextIds = new Set(nextTracks.map(t => t.id));
+      tracks.forEach(t => {
+        if (!nextIds.has(t.id)) URL.revokeObjectURL(t.url);
+      });
+      
+      tracks = nextTracks;
+      syncCurrentTrackIndex();
+      document.getElementById('playlist').classList.remove('hidden');
+      updatePlaylist();
+      if (!audio && tracks.length) loadTrack(0);
+      
+      lastFolderLabel = sourceLabel;
+      setPlaylistMeta(sourceLabel);
+    }
+    
+    function getFolderLabelFromFiles(files) {
+      const first = files && files[0];
+      if (!first || !first.webkitRelativePath) return 'Folder';
+      const parts = first.webkitRelativePath.split('/');
+      return parts[0] || 'Folder';
+    }
+    
+    async function scanDirectoryHandle(handle) {
+      const files = [];
+      for await (const [name, entry] of handle.entries()) {
+        if (entry.kind !== 'file') continue;
+        if (!AUDIO_FILE_REGEX.test(name)) continue;
+        const file = await entry.getFile();
+        files.push(file);
+      }
+      
+      if (files.length === 0) {
+        showError('No audio files found in this folder.');
+        return;
+      }
+      
+      replaceTracksFromFiles(files, handle.name || 'Folder');
+    }
+    
+    async function chooseFolder() {
+      if (supportsDirectoryPicker) {
+        try {
+          const handle = await window.showDirectoryPicker({ mode: 'read' });
+          directoryHandle = handle;
+          await saveDirectoryHandle(handle);
+          await scanDirectoryHandle(handle);
+        } catch (err) {
+          if (err && err.name !== 'AbortError') {
+            showError('Could not access that folder.');
+          }
+        }
+      } else {
+        document.getElementById('dirInput').click();
+      }
+    }
+    
+    async function rescanLibrary() {
+      if (directoryHandle) {
+        try {
+          const perm = await directoryHandle.queryPermission({ mode: 'read' });
+          if (perm !== 'granted') {
+            const req = await directoryHandle.requestPermission({ mode: 'read' });
+            if (req !== 'granted') {
+              showError('Folder permission not granted.');
+              return;
+            }
+          }
+          await scanDirectoryHandle(directoryHandle);
+        } catch (err) {
+          showError('Could not rescan the folder.');
+        }
+        return;
+      }
+      
+      if (supportsDirectoryPicker) {
+        await chooseFolder();
+      } else {
+        document.getElementById('dirInput').click();
       }
     }
     
@@ -1204,7 +1442,7 @@
     document.body.addEventListener('dragover', e => e.preventDefault());
     document.body.addEventListener('drop', e => {
       e.preventDefault();
-      handleFiles(e.dataTransfer.files);
+      appendTracksFromFiles(e.dataTransfer.files, 'Dropped Files');
     });
     
     document.body.addEventListener('click', e => {
@@ -1214,12 +1452,24 @@
       }
     });
     
-    document.getElementById('fileInput').addEventListener('change', e => handleFiles(e.target.files));
+    document.getElementById('fileInput').addEventListener('change', e => {
+      appendTracksFromFiles(e.target.files, 'Files');
+      e.target.value = '';
+    });
+    
+    document.getElementById('dirInput').addEventListener('change', e => {
+      const label = getFolderLabelFromFiles(e.target.files);
+      replaceTracksFromFiles(e.target.files, label);
+      e.target.value = '';
+    });
+    
     document.getElementById('playBtn').onclick = () => isPlaying ? pause() : play();
+    document.getElementById('folderBtn').onclick = () => chooseFolder();
+    document.getElementById('rescanBtn').onclick = () => rescanLibrary();
     
     document.getElementById('progressBar').onclick = e => {
-      if (!audio) return;
-      const rect = e.target.getBoundingClientRect();
+      if (!audio || !isFinite(audio.duration)) return;
+      const rect = e.currentTarget.getBoundingClientRect();
       audio.currentTime = ((e.clientX - rect.left) / rect.width) * audio.duration;
     };
     
@@ -1236,6 +1486,8 @@
       document.getElementById('controls').classList.remove('hidden');
       document.getElementById('fullscreenBtn').classList.remove('hidden');
       document.getElementById('colorBtn').classList.remove('hidden');
+      document.getElementById('rescanBtn').classList.remove('hidden');
+      document.getElementById('folderBtn').classList.remove('hidden');
       document.getElementById('playlist').classList.remove('hidden');
       document.getElementById('shortcutsHint').classList.remove('hidden');
       clearTimeout(hideTimeout);
@@ -1244,6 +1496,8 @@
           document.getElementById('controls').classList.add('hidden');
           document.getElementById('fullscreenBtn').classList.add('hidden');
           document.getElementById('colorBtn').classList.add('hidden');
+          document.getElementById('rescanBtn').classList.add('hidden');
+          document.getElementById('folderBtn').classList.add('hidden');
           document.getElementById('playlist').classList.add('hidden');
           document.getElementById('shortcutsHint').classList.add('hidden');
         }
@@ -1267,16 +1521,10 @@
           isPlaying ? pause() : play();
           break;
         case 'ArrowRight':
-          if (currentTrackIndex < tracks.length - 1) {
-            loadTrack(currentTrackIndex + 1);
-            play();
-          }
+          playNextTrack();
           break;
         case 'ArrowLeft':
-          if (currentTrackIndex > 0) {
-            loadTrack(currentTrackIndex - 1);
-            play();
-          }
+          playPreviousTrack();
           break;
         case 'KeyF':
           document.getElementById('fullscreenBtn').click();
@@ -1284,41 +1532,28 @@
         case 'KeyC':
           setColorScheme((currentColorIndex + 1) % colorSchemes.length);
           break;
+        case 'KeyO':
+          chooseFolder();
+          break;
+        case 'KeyR':
+          rescanLibrary();
+          break;
       }
     });
     
-    // ==================== AUTO-LOAD LOCAL FILES ====================
-    const localTracks = [
-      'Arutani - Babbelas (Original Mix).aiff',
-      'Bakermat - Uitzicht (Original Mix).aiff',
-      'Buba - U Nama (Original Mix).aiff',
-      'Fabian Krooss - Coquin (Original Mix).aiff',
-      'Jan Blomqvist - The Space In Between (Ben Böhmer Extended Remix).aiff',
-      'Jay Lumen - Mandala (Original Mix).aiff',
-      'Roland Clark, John Julius Knight, Eddie Thoneick, Kryder - House Music feat. John Julius Knight feat. Roland Clark (Main Extended Mix).aiff',
-      'Think City, Jean Vayat - Cheetah (Original Mix).aiff',
-      'Worakls - Lueur (Original Mix).aiff',
-      'okuma - Kalkutta (Original Mix).aiff',
-    ];
-    
-    function autoLoadLocalTracks() {
-      localTracks.forEach(filename => {
-        tracks.push({
-          name: filename.replace(/\.[^.]+$/, ''),
-          url: encodeURI(filename)
-        });
-      });
-      
-      if (tracks.length > 0) {
-        document.getElementById('playlist').classList.remove('hidden');
-        document.getElementById('dropZone').classList.add('has-audio');
-        updatePlaylist();
-        loadTrack(0);
+    // ==================== AUTO-LOAD SAVED FOLDER ====================
+    async function autoLoadSavedFolder() {
+      if (!supportsDirectoryPicker) return;
+      const handle = await loadDirectoryHandle();
+      if (!handle) return;
+      const perm = await handle.queryPermission({ mode: 'read' });
+      if (perm === 'granted') {
+        directoryHandle = handle;
+        await scanDirectoryHandle(handle);
       }
     }
     
-    // Auto-load on page ready
-    autoLoadLocalTracks();
+    autoLoadSavedFolder();
     
     // ==================== ANIMATION LOOP ====================
     function animate() {
