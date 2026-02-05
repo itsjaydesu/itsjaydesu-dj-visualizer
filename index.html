@@ -263,6 +263,11 @@
       background: linear-gradient(135deg, rgba(102,126,234,0.3), rgba(118,75,162,0.3));
     }
     
+    .playlist-item.disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    
     .mode-display {
       position: fixed;
       top: 50%;
@@ -529,7 +534,7 @@
         <button class="start-btn secondary" id="startFolderBtn">Choose Folder</button>
         <button class="start-btn" id="startPlayBtn" disabled>Play</button>
       </div>
-      <div class="start-note">Tip: AIFF playback works best in Safari.</div>
+      <div class="start-note" id="startNote">Tip: AIFF playback works best in Safari.</div>
       <details class="diagnostics" id="diagnosticsBox">
         <summary>Diagnostics</summary>
         <pre id="diagnosticsText">No diagnostics yet.</pre>
@@ -661,6 +666,35 @@
     const AUDIO_FILE_REGEX = /\.(mp3|wav|aiff|aif|flac|m4a|ogg|aac|alac|wma|opus)$/i;
     const HANDLE_DB_NAME = 'dj-visualizer';
     const HANDLE_DB_STORE = 'handles';
+    const AUDIO_MIME_BY_EXT = {
+      mp3: 'audio/mpeg',
+      wav: 'audio/wav',
+      aif: 'audio/aiff',
+      aiff: 'audio/aiff',
+      flac: 'audio/flac',
+      m4a: 'audio/mp4',
+      aac: 'audio/aac',
+      ogg: 'audio/ogg',
+      opus: 'audio/ogg',
+      alac: 'audio/mp4',
+      wma: 'audio/x-ms-wma'
+    };
+    
+    function detectBrowser() {
+      const ua = navigator.userAgent;
+      const isEdge = /Edg/.test(ua);
+      const isChrome = /Chrome|Chromium/.test(ua) && !isEdge;
+      const isFirefox = /Firefox/.test(ua);
+      const isSafari = /Safari/.test(ua) && !isChrome && !isEdge;
+      let name = 'Browser';
+      if (isSafari) name = 'Safari';
+      else if (isChrome) name = 'Chrome';
+      else if (isEdge) name = 'Edge';
+      else if (isFirefox) name = 'Firefox';
+      return { name, isSafari, isChrome, isEdge, isFirefox };
+    }
+    
+    const browserInfo = detectBrowser();
     
     // ==================== VISUALIZATIONS ====================
     const visualizations = [
@@ -729,7 +763,34 @@
       return match ? match[1].toLowerCase() : '';
     }
     
+    function canPlayMime(mime) {
+      if (!mime || !audioEl) return false;
+      const result = audioEl.canPlayType(mime);
+      return result === 'probably' || result === 'maybe';
+    }
+    
+    function isSupportedFormat(ext, mime) {
+      if (ext === 'aif' || ext === 'aiff') {
+        return browserInfo.isSafari;
+      }
+      if (mime && canPlayMime(mime)) return true;
+      if (ext && AUDIO_MIME_BY_EXT[ext]) {
+        return canPlayMime(AUDIO_MIME_BY_EXT[ext]);
+      }
+      return false;
+    }
+    
+    function unsupportedReason(ext) {
+      if (ext === 'aif' || ext === 'aiff') {
+        return `AIFF is not supported in ${browserInfo.name}. Use Safari or convert to WAV/MP3.`;
+      }
+      return `This format is not supported in ${browserInfo.name}.`;
+    }
+    
     function buildTrackFromFile(file) {
+      const ext = getExtension(file.name);
+      const mime = file.type || AUDIO_MIME_BY_EXT[ext] || '';
+      const supported = isSupportedFormat(ext, mime);
       return {
         id: makeTrackId(file),
         name: trackNameFromFile(file),
@@ -737,18 +798,27 @@
         file,
         isObjectUrl: true,
         duration: NaN,
-        extension: getExtension(file.name)
+        extension: ext,
+        mime,
+        supported,
+        unsupportedReason: supported ? '' : unsupportedReason(ext)
       };
     }
     
     function buildTrackFromUrl(url) {
+      const ext = getExtension(url);
+      const mime = AUDIO_MIME_BY_EXT[ext] || '';
+      const supported = isSupportedFormat(ext, mime);
       return {
         id: makeTrackIdFromUrl(url),
         name: trackNameFromUrl(url),
         url,
         isObjectUrl: false,
         duration: NaN,
-        extension: getExtension(url)
+        extension: ext,
+        mime,
+        supported,
+        unsupportedReason: supported ? '' : unsupportedReason(ext)
       };
     }
     
@@ -830,10 +900,12 @@
       
       const durations = tracks.map(t => (isFinite(t.duration) ? t.duration : 0));
       const unknownCount = tracks.filter(t => !isFinite(t.duration)).length;
+      const unsupportedCount = tracks.filter(t => !t.supported).length;
       totalPlaylistSeconds = durations.reduce((sum, val) => sum + val, 0);
       const totalLabel = formatDuration(totalPlaylistSeconds) + (unknownCount ? ' +' : '');
       const loopLabel = playlistLoopCount > 0 ? playlistLoopCount : 1;
-      playlistTimeEl.textContent = `Playlist: ${totalLabel} · Loop: ${loopLabel}`;
+      const unsupportedLabel = unsupportedCount ? ` · Unsupported: ${unsupportedCount}` : '';
+      playlistTimeEl.textContent = `Playlist: ${totalLabel} · Loop: ${loopLabel}${unsupportedLabel}`;
     }
     
     function loadTrackDuration(track) {
@@ -1619,6 +1691,7 @@
       const hint = document.getElementById('startHint');
       const playBtn = document.getElementById('startPlayBtn');
       const folderBtn = document.getElementById('startFolderBtn');
+      const note = document.getElementById('startNote');
       if (!hint) return;
       if (!tracks.length) {
         hint.textContent = 'Choose a folder, then hit Play to unlock audio.';
@@ -1628,6 +1701,13 @@
         hint.textContent = 'Click Play to unlock audio and start.';
         if (playBtn) playBtn.disabled = false;
         if (folderBtn) folderBtn.textContent = 'Change Folder';
+      }
+      if (note) {
+        if (browserInfo.isSafari) {
+          note.textContent = 'Safari detected. AIFF should play here.';
+        } else {
+          note.textContent = `${browserInfo.name} detected. AIFF may not play; MP3/WAV is safest.`;
+        }
       }
     }
     
@@ -1671,6 +1751,7 @@
       const diagnostics = [
         `Reason: ${reason}`,
         `Protocol: ${window.location.protocol}`,
+        `Browser: ${browserInfo.name}`,
         `User Agent: ${navigator.userAgent}`,
         `Context: ${contextState} (${sampleRate} Hz)`,
         `Track: ${track ? track.name : 'none'}`,
@@ -1760,11 +1841,40 @@
       }
     }
     
-    function loadTrack(index) {
+    function findNextSupportedIndex(startIndex, direction = 1) {
+      if (!tracks.length) return -1;
+      let idx = startIndex;
+      for (let i = 0; i < tracks.length; i++) {
+        if (idx >= tracks.length) idx = 0;
+        if (idx < 0) idx = tracks.length - 1;
+        if (tracks[idx] && tracks[idx].supported) return idx;
+        idx += direction;
+      }
+      return -1;
+    }
+    
+    function loadTrack(index, options = {}) {
       if (tracks.length === 0) return;
       
-      currentTrackIndex = index;
       const track = tracks[index];
+      if (!track) return false;
+      
+      if (!track.supported) {
+        showWarn(track.unsupportedReason || 'This track format is not supported.');
+        if (options.allowSkip === false) {
+          updateDiagnostics('unsupported track');
+          return false;
+        }
+        const nextIdx = findNextSupportedIndex(index + 1, 1);
+        if (nextIdx === -1) {
+          showError(`No playable tracks in ${browserInfo.name}.`);
+          updateDiagnostics('no playable tracks');
+          return false;
+        }
+        return loadTrack(nextIdx, options);
+      }
+      
+      currentTrackIndex = index;
       currentTrackId = track.id;
       updateDiagnostics('load track');
       
@@ -1828,6 +1938,7 @@
       });
       
       updatePlaylist();
+      return true;
     }
     
     function updatePlayIcon(playing) {
@@ -1901,15 +2012,15 @@
       const auto = options.auto === true;
       const nextIndex = currentTrackIndex === -1 ? 0 : currentTrackIndex + 1;
       if (nextIndex < tracks.length) {
-        loadTrack(nextIndex);
-        play();
+        const loaded = loadTrack(nextIndex);
+        if (loaded) play();
         return;
       }
       if (loopAll) {
         playlistLoopCount = Math.max(1, playlistLoopCount);
         if (auto) playlistLoopCount += 1;
-        loadTrack(0);
-        play();
+        const loaded = loadTrack(0);
+        if (loaded) play();
         updatePlaylistStats();
       } else {
         pause();
@@ -1920,13 +2031,13 @@
       if (!tracks.length) return;
       const prevIndex = currentTrackIndex === -1 ? 0 : currentTrackIndex - 1;
       if (prevIndex >= 0) {
-        loadTrack(prevIndex);
-        play();
+        const loaded = loadTrack(prevIndex);
+        if (loaded) play();
         return;
       }
       if (loopAll) {
-        loadTrack(tracks.length - 1);
-        play();
+        const loaded = loadTrack(tracks.length - 1);
+        if (loaded) play();
       }
     }
     
@@ -1949,9 +2060,14 @@
       container.innerHTML = '';
       tracks.forEach((track, i) => {
         const item = document.createElement('div');
-        item.className = 'playlist-item' + (i === currentTrackIndex ? ' active' : '');
-        item.textContent = track.name;
-        item.onclick = () => { loadTrack(i); play(); };
+        const isActive = i === currentTrackIndex;
+        const isDisabled = !track.supported;
+        item.className = 'playlist-item' + (isActive ? ' active' : '') + (isDisabled ? ' disabled' : '');
+        item.textContent = track.name + (isDisabled ? ' (unsupported)' : '');
+        item.onclick = () => {
+          const loaded = loadTrack(i, { allowSkip: false });
+          if (loaded) play();
+        };
         container.appendChild(item);
       });
       updatePlaylistStats();
@@ -1979,7 +2095,9 @@
         if (!audio) loadTrack(0);
       }
       updateStartOverlay();
-      showInfo(`Added ${audioFiles.length} track${audioFiles.length === 1 ? '' : 's'}.`);
+      const unsupportedCount = tracks.filter(t => !t.supported).length;
+      const supportNote = unsupportedCount ? ` (${unsupportedCount} unsupported in ${browserInfo.name})` : '';
+      showInfo(`Added ${audioFiles.length} track${audioFiles.length === 1 ? '' : 's'}.${supportNote}`);
       
       if (playlistLoopCount === 0 && tracks.length) {
         playlistLoopCount = 1;
@@ -2025,8 +2143,8 @@
       if (!audio && tracks.length) {
         loadTrack(0);
       } else if (wasPlaying && currentTrackIndex === -1 && tracks.length) {
-        loadTrack(0);
-        play();
+        const loaded = loadTrack(0);
+        if (loaded) play();
       }
       updateStartOverlay();
       if (tracks.length) {
@@ -2038,7 +2156,9 @@
       
       lastFolderLabel = sourceLabel;
       setPlaylistMeta(sourceLabel);
-      showInfo(`Loaded ${tracks.length} track${tracks.length === 1 ? '' : 's'} from ${sourceLabel}.`);
+      const unsupportedCount = tracks.filter(t => !t.supported).length;
+      const supportNote = unsupportedCount ? ` (${unsupportedCount} unsupported in ${browserInfo.name})` : '';
+      showInfo(`Loaded ${tracks.length} track${tracks.length === 1 ? '' : 's'} from ${sourceLabel}.${supportNote}`);
     }
     
     function replaceTracksFromUrls(urls, sourceLabel = 'Current Folder') {
@@ -2070,8 +2190,8 @@
       if (!audio && tracks.length) {
         loadTrack(0);
       } else if (wasPlaying && currentTrackIndex === -1 && tracks.length) {
-        loadTrack(0);
-        play();
+        const loaded = loadTrack(0);
+        if (loaded) play();
       }
       
       if (tracks.length) {
@@ -2083,7 +2203,9 @@
       
       lastFolderLabel = sourceLabel;
       setPlaylistMeta(sourceLabel);
-      showInfo(`Loaded ${tracks.length} track${tracks.length === 1 ? '' : 's'} from ${sourceLabel}.`);
+      const unsupportedCount = tracks.filter(t => !t.supported).length;
+      const supportNote = unsupportedCount ? ` (${unsupportedCount} unsupported in ${browserInfo.name})` : '';
+      showInfo(`Loaded ${tracks.length} track${tracks.length === 1 ? '' : 's'} from ${sourceLabel}.${supportNote}`);
       return true;
     }
     
@@ -2261,7 +2383,10 @@
         showWarn('Choose a folder first.');
         return;
       }
-      if (!audio && tracks.length) loadTrack(0);
+      if (!audio && tracks.length) {
+        const loaded = loadTrack(0);
+        if (!loaded) return;
+      }
       play();
     };
     
