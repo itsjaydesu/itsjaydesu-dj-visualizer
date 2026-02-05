@@ -24,6 +24,8 @@
       z-index: 1;
     }
     
+    audio { display: none; }
+    
     .controls {
       position: fixed;
       bottom: 0;
@@ -516,6 +518,7 @@
     <div class="drop-hint" style="margin-top: 15px; color: #f5af19;">⚠️ AIFF files require Safari</div>
   </div>
   
+  <audio id="audioEl" preload="auto" playsinline></audio>
   <div class="mode-display" id="modeDisplay"></div>
   <div class="error-toast" id="errorToast"></div>
   <div class="start-overlay show" id="startOverlay">
@@ -596,7 +599,7 @@
     <div id="playlistItems"></div>
   </div>
   
-  <div class="top-actions" id="topActions">
+  <div class="top-actions hidden" id="topActions">
     <button class="action-btn help-btn" id="helpBtn">? Help [H]</button>
     <button class="action-btn folder-btn" id="folderBtn">📁 Folder [O]</button>
     <button class="action-btn rescan-btn" id="rescanBtn">↻ Rescan [R]</button>
@@ -604,12 +607,12 @@
     <button class="action-btn fullscreen-btn" id="fullscreenBtn">⛶ Fullscreen [F]</button>
   </div>
   
-  <div class="shortcuts-hint" id="shortcutsHint">
+  <div class="shortcuts-hint hidden" id="shortcutsHint">
     1-9, 0 → visuals | C → colors | O → folder | R → rescan | H → help | F → fullscreen<br>
     Space → play/pause | ←→ → tracks
   </div>
   
-  <div class="controls" id="controls">
+  <div class="controls hidden" id="controls">
     <div class="viz-modes" id="vizModes"></div>
     
     <div class="player-row">
@@ -634,6 +637,7 @@
   <script>
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
+    const audioEl = document.getElementById('audioEl');
     
     let audioContext, analyser, source, audio;
     let analyserConnected = false;
@@ -1654,6 +1658,7 @@
         src: audio.src,
         paused: audio.paused,
         muted: audio.muted,
+        ended: audio.ended,
         volume: audio.volume,
         currentTime: audio.currentTime,
         duration: audio.duration,
@@ -1675,6 +1680,7 @@
         audioState ? `Audio Src: ${audioState.src}` : null,
         audioState ? `Audio Paused: ${audioState.paused}` : null,
         audioState ? `Audio Muted: ${audioState.muted}` : null,
+        audioState ? `Audio Ended: ${audioState.ended}` : null,
         audioState ? `Audio Volume: ${audioState.volume}` : null,
         audioState ? `Audio Time: ${audioState.currentTime.toFixed(2)} / ${isFinite(audioState.duration) ? audioState.duration.toFixed(2) : 'NaN'}` : null,
         audioState ? `Ready State: ${audioState.readyState}` : null,
@@ -1694,6 +1700,10 @@
         dataArray = new Uint8Array(bufferLength);
         timeArray = new Uint8Array(bufferLength);
         analyserConnected = false;
+      }
+      if (!source) {
+        source = audioContext.createMediaElementSource(audioEl);
+        source.connect(analyser);
       }
       if (!analyserConnected) {
         analyser.connect(audioContext.destination);
@@ -1758,45 +1768,52 @@
       currentTrackId = track.id;
       updateDiagnostics('load track');
       
+      audio = audioEl;
       if (audio) {
         audio.pause();
-        if (source) source.disconnect();
       }
       
-      audio = new Audio();
       audio.src = track.url;
+      audio.load();
       
       showInfo(`Loading: ${track.name}`);
-      audio.addEventListener('error', () => {
+      audio.onerror = () => {
         showError(describeAudioError(track, audio.error));
         showStartOverlay(true);
         updateDiagnostics('audio error');
-      });
-      audio.addEventListener('canplay', () => {
+      };
+      audio.oncanplay = () => {
         showInfo(`Ready: ${track.name}`);
         updateDiagnostics('canplay');
-      }, { once: true });
-      audio.addEventListener('playing', () => {
+      };
+      audio.onplaying = () => {
         setStatus(`Playing: ${track.name}`, 'info');
         showStartOverlay(false);
+        showControls();
         updateDiagnostics('playing');
-      });
-      audio.addEventListener('pause', () => {
+      };
+      audio.onpause = () => {
         if (!audio.ended) setStatus(`Paused: ${track.name}`, 'info');
         updateDiagnostics('pause');
-      });
-      audio.addEventListener('waiting', () => {
+      };
+      audio.onwaiting = () => {
         setStatus(`Buffering: ${track.name}`, 'warn');
         updateDiagnostics('waiting');
-      });
-      audio.addEventListener('stalled', () => {
+      };
+      audio.onstalled = () => {
         setStatus(`Stalled: ${track.name}`, 'warn');
         updateDiagnostics('stalled');
-      });
+      };
+      audio.onplay = () => {
+        setStatus(`Play requested: ${track.name}`, 'info');
+        updateDiagnostics('play event');
+      };
+      audio.onended = () => {
+        setStatus(`Ended: ${track.name}`, 'info');
+        updateDiagnostics('ended');
+      };
       
       initAudio();
-      source = audioContext.createMediaElementSource(audio);
-      source.connect(analyser);
       
       document.getElementById('trackName').textContent = track.name;
       document.getElementById('dropZone').classList.add('has-audio');
@@ -1835,6 +1852,14 @@
       }
       
       const playPromise = audio.play();
+      const startTime = audio.currentTime;
+      setTimeout(() => {
+        if (audio && audio.paused && audio.currentTime === startTime) {
+          showWarn('Playback did not start. Click Play again or reload the page.');
+          showStartOverlay(true);
+          updateDiagnostics('play watchdog');
+        }
+      }, 900);
       if (playPromise && playPromise.then) {
         playPromise.then(() => {
           isPlaying = true;
@@ -2256,6 +2281,7 @@
     
     // Auto-hide controls
     function showControls() {
+      if (document.getElementById('startOverlay').classList.contains('show')) return;
       document.getElementById('controls').classList.remove('hidden');
       document.getElementById('topActions').classList.remove('hidden');
       document.getElementById('playlist').classList.remove('hidden');
