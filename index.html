@@ -605,6 +605,7 @@
             <li><span class="help-key">← / →</span> Previous / Next</li>
             <li><span class="help-key">1-9, 0</span> Visual modes</li>
             <li><span class="help-key">C</span> Color scheme</li>
+            <li><span class="help-key">M</span> Mono mode</li>
             <li><span class="help-key">O</span> Folder picker</li>
             <li><span class="help-key">R</span> Rescan folder</li>
             <li><span class="help-key">H</span> Toggle help</li>
@@ -628,6 +629,7 @@
             <li><span class="help-key">← / →</span> 前 / 次</li>
             <li><span class="help-key">1-9, 0</span> ビジュアル切替</li>
             <li><span class="help-key">C</span> カラースキーム</li>
+            <li><span class="help-key">M</span> モノクロ</li>
             <li><span class="help-key">O</span> フォルダ選択</li>
             <li><span class="help-key">R</span> 再スキャン</li>
             <li><span class="help-key">H</span> ヘルプ</li>
@@ -646,13 +648,14 @@
   
   <div class="top-actions hidden" id="topActions">
     <button class="action-btn help-btn" id="helpBtn">? Help [H]</button>
+    <button class="action-btn mono-btn" id="monoBtn">⚪ Mono [M]</button>
     <button class="action-btn folder-btn" id="folderBtn">📁 Folder [O]</button>
     <button class="action-btn rescan-btn" id="rescanBtn">↻ Rescan [R]</button>
     <button class="action-btn fullscreen-btn" id="fullscreenBtn">⛶ Fullscreen [F]</button>
   </div>
   
   <div class="shortcuts-hint hidden" id="shortcutsHint">
-    1-9, 0 → visuals | C → next palette | O → folder | R → rescan | H → help | F → fullscreen<br>
+    1-9, 0 → visuals | C → next palette | M → mono | O → folder | R → rescan | H → help | F → fullscreen<br>
     Space → play/pause | ←→ → tracks
   </div>
   
@@ -750,7 +753,15 @@
       { name: 'Fractal', key: '0', fn: drawFractal },
     ];
     
+    const monoVisualizations = [
+      { name: 'Mono Spectrum', key: '1', fn: drawMonoSpectrum },
+      { name: 'Mono Rings', key: '2', fn: drawMonoRings },
+      { name: 'Mono Grid', key: '3', fn: drawMonoGrid },
+      { name: 'Mono Pulse', key: '4', fn: drawMonoPulse },
+    ];
+    
     let currentVizIndex = 0;
+    let monoMode = false;
     const SPECTRUM_BARS = 96;
     let spectrumPeaks = new Float32Array(SPECTRUM_BARS);
     
@@ -987,13 +998,19 @@
       }
     }
     
+    function getActiveVisualizations() {
+      return monoMode ? monoVisualizations : visualizations;
+    }
+    
     function getColor(i, total, intensity = 1) {
+      if (monoMode) return '#ffffff';
       const colors = colorSchemes[currentColorIndex].colors;
       const idx = Math.floor((i / total) * colors.length) % colors.length;
       return colors[idx];
     }
     
     function getColorRaw(index) {
+      if (monoMode) return '#ffffff';
       return colorSchemes[currentColorIndex].colors[index % colorSchemes[currentColorIndex].colors.length];
     }
     
@@ -1099,6 +1116,153 @@
         ctx.globalAlpha = 1;
       }
       ctx.shadowBlur = 0;
+    }
+
+    // ==================== MONO SPECTRUM ====================
+    function drawMonoSpectrum() {
+      analyser.getByteFrequencyData(dataArray);
+      analyser.getByteTimeDomainData(timeArray);
+      const w = window.innerWidth, h = window.innerHeight;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, w, h);
+      
+      const bars = 72;
+      const barW = w / bars;
+      const nyquist = (audioContext ? audioContext.sampleRate : 48000) / 2;
+      const minFreq = 30;
+      const maxFreq = Math.min(14000, nyquist);
+      const midY = h * 0.58;
+      
+      for (let i = 0; i < bars; i++) {
+        const t = i / (bars - 1);
+        const freq = minFreq * Math.pow(maxFreq / minFreq, t);
+        const idx = getFreqIndexForHz(freq, nyquist);
+        const val = dataArray[idx] / 255;
+        const height = Math.pow(val, 1.3) * h * 0.7;
+        const x = i * barW;
+        
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(x + 1, midY - height * 0.5, barW - 2, height);
+      }
+    }
+
+    // ==================== MONO RINGS ====================
+    function drawMonoRings() {
+      analyser.getByteFrequencyData(dataArray);
+      analyser.getByteTimeDomainData(timeArray);
+      const w = window.innerWidth, h = window.innerHeight;
+      const cx = w / 2, cy = h / 2;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, w, h);
+      
+      time += 0.02;
+      const nyquist = (audioContext ? audioContext.sampleRate : 48000) / 2;
+      const bass = getAvgFrequencyByHz(30, 160, nyquist) / 255;
+      const mid = getAvgFrequencyByHz(160, 1200, nyquist) / 255;
+      
+      const rings = 5;
+      for (let i = 0; i < rings; i++) {
+        const radius = Math.min(w, h) * (0.12 + i * 0.09) * (1 + bass * 0.25);
+        ctx.beginPath();
+        ctx.arc(cx, cy, safeRadius(radius), 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+        ctx.lineWidth = 1 + i * 0.6 + mid * 2;
+        ctx.stroke();
+      }
+      
+      // Rotating radial lines
+      const spokes = 40;
+      const spin = time * (0.6 + mid);
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < spokes; i++) {
+        const angle = (i / spokes) * Math.PI * 2 + spin;
+        const r1 = Math.min(w, h) * 0.12;
+        const r2 = Math.min(w, h) * (0.42 + bass * 0.2);
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(angle) * r1, cy + Math.sin(angle) * r1);
+        ctx.lineTo(cx + Math.cos(angle) * r2, cy + Math.sin(angle) * r2);
+        ctx.stroke();
+      }
+    }
+
+    // ==================== MONO GRID ====================
+    function drawMonoGrid() {
+      analyser.getByteTimeDomainData(timeArray);
+      const w = window.innerWidth, h = window.innerHeight;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, w, h);
+      
+      const rows = 10;
+      const cols = 22;
+      const amp = getRmsLevel();
+      
+      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      ctx.lineWidth = 1;
+      for (let r = 0; r <= rows; r++) {
+        const y = (r / rows) * h;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+      
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      for (let c = 0; c <= cols; c++) {
+        const x = (c / cols) * w;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+      }
+      
+      // Waveform line
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const slice = Math.max(1, Math.floor(timeArray.length / w));
+      for (let x = 0; x < w; x++) {
+        const idx = Math.min(timeArray.length - 1, x * slice);
+        const v = (timeArray[idx] - 128) / 128;
+        const y = h * 0.5 + v * h * 0.25 * (1 + amp);
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    // ==================== MONO PULSE ====================
+    function drawMonoPulse() {
+      analyser.getByteFrequencyData(dataArray);
+      analyser.getByteTimeDomainData(timeArray);
+      const w = window.innerWidth, h = window.innerHeight;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, w, h);
+      
+      time += 0.015;
+      const nyquist = (audioContext ? audioContext.sampleRate : 48000) / 2;
+      const bass = getAvgFrequencyByHz(30, 140, nyquist) / 255;
+      const mid = getAvgFrequencyByHz(200, 1200, nyquist) / 255;
+      const size = Math.min(w, h) * (0.18 + bass * 0.35);
+      
+      // Pulsing square
+      ctx.save();
+      ctx.translate(w / 2, h / 2);
+      ctx.rotate(time * (0.3 + mid));
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2 + mid * 4;
+      ctx.strokeRect(-size, -size, size * 2, size * 2);
+      ctx.restore();
+      
+      // Corner dots
+      const dotR = 3 + bass * 6;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(w * 0.2, h * 0.2, dotR, 0, Math.PI * 2);
+      ctx.arc(w * 0.8, h * 0.2, dotR, 0, Math.PI * 2);
+      ctx.arc(w * 0.2, h * 0.8, dotR, 0, Math.PI * 2);
+      ctx.arc(w * 0.8, h * 0.8, dotR, 0, Math.PI * 2);
+      ctx.fill();
     }
     
     // ==================== CIRCULAR ====================
@@ -1707,14 +1871,19 @@
     
     // Build viz buttons
     const vizModes = document.getElementById('vizModes');
-    visualizations.forEach((viz, i) => {
-      const btn = document.createElement('button');
-      btn.className = 'viz-btn' + (i === 0 ? ' active' : '');
-      btn.innerHTML = `<span class="key">${viz.key}</span>${viz.name}`;
-      btn.dataset.index = i;
-      btn.onclick = () => setVisualization(i);
-      vizModes.appendChild(btn);
-    });
+    function renderVizButtons() {
+      vizModes.innerHTML = '';
+      const list = getActiveVisualizations();
+      list.forEach((viz, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'viz-btn' + (i === 0 ? ' active' : '');
+        btn.innerHTML = `<span class="key">${viz.key}</span>${viz.name}`;
+        btn.dataset.index = i;
+        btn.onclick = () => setVisualization(i);
+        vizModes.appendChild(btn);
+      });
+    }
+    renderVizButtons();
     
     // Build palette buttons
     const paletteBar = document.getElementById('paletteBar');
@@ -1729,11 +1898,13 @@
     });
     
     function setVisualization(index) {
-      currentVizIndex = index;
+      const list = getActiveVisualizations();
+      const safeIndex = Math.max(0, Math.min(index, list.length - 1));
+      currentVizIndex = safeIndex;
       document.querySelectorAll('.viz-btn').forEach((b, i) => {
-        b.classList.toggle('active', i === index);
+        b.classList.toggle('active', i === safeIndex);
       });
-      showModeDisplay(visualizations[index].name);
+      showModeDisplay(list[safeIndex].name, monoMode ? '#fff' : getColorRaw(0));
       // Reset mode-specific state
       particles = [];
       fireworks = [];
@@ -1748,6 +1919,7 @@
     }
     
     function setColorScheme(index) {
+      if (monoMode) return;
       currentColorIndex = index;
       document.querySelectorAll('.palette-btn').forEach((b, i) => {
         b.classList.toggle('active', i === index);
@@ -2460,6 +2632,14 @@
     document.getElementById('playBtn').onclick = () => isPlaying ? pause() : play();
     document.getElementById('folderBtn').onclick = () => chooseFolder();
     document.getElementById('rescanBtn').onclick = () => rescanLibrary();
+    document.getElementById('monoBtn').onclick = () => {
+      monoMode = !monoMode;
+      document.getElementById('monoBtn').textContent = monoMode ? '◑ Color [M]' : '⚪ Mono [M]';
+      document.getElementById('paletteBar').style.display = monoMode ? 'none' : 'flex';
+      currentVizIndex = 0;
+      renderVizButtons();
+      setVisualization(0);
+    };
     document.getElementById('helpBtn').onclick = () => toggleHelp();
     document.getElementById('helpClose').onclick = () => toggleHelp(false);
     document.getElementById('helpOverlay').addEventListener('click', e => {
@@ -2537,6 +2717,9 @@
         case 'KeyC':
           setColorScheme((currentColorIndex + 1) % colorSchemes.length);
           break;
+        case 'KeyM':
+          document.getElementById('monoBtn').click();
+          break;
         case 'KeyO':
           chooseFolder();
           break;
@@ -2579,7 +2762,8 @@
     function animate() {
       try {
         if (analyser && dataArray) {
-          visualizations[currentVizIndex].fn();
+          const list = getActiveVisualizations();
+          if (list[currentVizIndex]) list[currentVizIndex].fn();
         } else {
           // Clear to black when no audio
           ctx.fillStyle = '#000';
