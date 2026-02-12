@@ -144,47 +144,6 @@
       margin-top: 2px;
     }
     
-    .palette-bar {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 14px;
-      overflow-x: auto;
-      padding-bottom: 4px;
-      scrollbar-width: none;
-    }
-    
-    .palette-bar::-webkit-scrollbar { display: none; }
-    
-    .palette-btn {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid var(--border);
-      color: var(--ink);
-      padding: 6px 10px;
-      border-radius: 999px;
-      cursor: pointer;
-      font-size: 11px;
-      white-space: nowrap;
-      transition: all 0.2s;
-      flex-shrink: 0;
-    }
-    
-    .palette-btn:hover { background: rgba(255,255,255,0.15); }
-    
-    .palette-btn.active {
-      border-color: rgba(255,255,255,0.35);
-      box-shadow: 0 0 0 1px rgba(255,255,255,0.2);
-    }
-    
-    .palette-swatch {
-      width: 40px;
-      height: 10px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.25);
-    }
-    
     .status-line {
       font-size: 11px;
       margin-top: 2px;
@@ -644,8 +603,6 @@
             <li><span class="help-key">Space</span> Play / Pause</li>
             <li><span class="help-key">← / →</span> Previous / Next</li>
             <li><span class="help-key">1-9, 0</span> Visual modes</li>
-            <li><span class="help-key">C</span> Tones</li>
-            <li><span class="help-key">M</span> Mono mode</li>
             <li><span class="help-key">O</span> Folder picker</li>
             <li><span class="help-key">R</span> Rescan folder</li>
             <li><span class="help-key">H</span> Toggle help</li>
@@ -668,8 +625,6 @@
             <li><span class="help-key">Space</span> 再生 / 停止</li>
             <li><span class="help-key">← / →</span> 前 / 次</li>
             <li><span class="help-key">1-9, 0</span> ビジュアル切替</li>
-            <li><span class="help-key">C</span> トーン切替</li>
-            <li><span class="help-key">M</span> モノクロ</li>
             <li><span class="help-key">O</span> フォルダ選択</li>
             <li><span class="help-key">R</span> 再スキャン</li>
             <li><span class="help-key">H</span> ヘルプ</li>
@@ -688,19 +643,17 @@
   
   <div class="top-actions hidden" id="topActions">
     <button class="action-btn help-btn" id="helpBtn">Help [H]</button>
-    <button class="action-btn mono-btn" id="monoBtn">Mono [M]</button>
     <button class="action-btn folder-btn" id="folderBtn">Folder [O]</button>
     <button class="action-btn rescan-btn" id="rescanBtn">Rescan [R]</button>
     <button class="action-btn fullscreen-btn" id="fullscreenBtn">Fullscreen [F]</button>
   </div>
   
   <div class="shortcuts-hint hidden" id="shortcutsHint">
-    1-9, 0 → visuals | C → tones | M → mono | O → folder | R → rescan | H → help | F → fullscreen<br>
+    1-9, 0 → visuals | O → folder | R → rescan | H → help | F → fullscreen<br>
     Space → play/pause | ←→ → tracks
   </div>
   
   <div class="controls hidden" id="controls">
-    <div class="palette-bar" id="paletteBar"></div>
     <div class="viz-modes" id="vizModes"></div>
     
     <div class="player-row">
@@ -735,7 +688,8 @@
     let currentTrackId = null;
     let isPlaying = false;
     let hideTimeout;
-    let particles = [];
+    let fieldNodes = [];
+    let burstSparks = [];
     let time = 0;
     let directoryHandle = null;
     let lastFolderLabel = '';
@@ -786,28 +740,16 @@
       { name: 'Field', key: '3', fn: drawParticles },
       { name: 'Braid', key: '4', fn: drawDNA },
       { name: 'Arcs', key: '5', fn: drawKaleidoscope },
-      { name: 'Columns', key: '6', fn: drawMatrix },
+      { name: 'Spectrogram', key: '6', fn: drawSpectrogram },
       { name: 'Burst', key: '7', fn: drawFireworks },
       { name: 'Horizon', key: '8', fn: drawAurora },
       { name: 'Grid', key: '9', fn: drawSynthwave },
       { name: 'Nested', key: '0', fn: drawFractal },
     ];
     
-    const monoVisualizations = visualizations;
-    
     let currentVizIndex = 0;
-    let monoMode = false;
-    const SPECTRUM_BARS = 96;
-    let spectrumPeaks = new Float32Array(SPECTRUM_BARS);
-    
-    // ==================== COLOR SCHEMES ====================
-    const colorSchemes = [
-      { name: 'Ink', colors: ['#f5f5f5', '#bdbdbd', '#5a5a5a', '#222222', '#050505'] },
-      { name: 'Chalk', colors: ['#ffffff', '#cfcfcf', '#6d6d6d', '#2b2b2b', '#000000'] },
-      { name: 'Slate', colors: ['#ededed', '#a9a9a9', '#4a4a4a', '#222222', '#0a0a0a'] },
-    ];
-    
-    let currentColorIndex = 0;
+    const SPECTROGRAM_BINS = 72;
+    let spectrogramHistory = [];
     
     // ==================== HELPER FUNCTIONS ====================
     function isAudioFile(file) {
@@ -1027,28 +969,7 @@
     }
     
     function getActiveVisualizations() {
-      return monoMode ? monoVisualizations : visualizations;
-    }
-    
-    function getColor(i, total, intensity = 1) {
-      if (monoMode) return '#ffffff';
-      const colors = colorSchemes[currentColorIndex].colors;
-      const idx = Math.floor((i / total) * colors.length) % colors.length;
-      return colors[idx];
-    }
-    
-    function getColorRaw(index) {
-      if (monoMode) return '#ffffff';
-      return colorSchemes[currentColorIndex].colors[index % colorSchemes[currentColorIndex].colors.length];
-    }
-    
-    function hexToRgb(hex) {
-      const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-      return result ? {
-        r: parseInt(result[1], 16),
-        g: parseInt(result[2], 16),
-        b: parseInt(result[3], 16)
-      } : { r: 255, g: 255, b: 255 };
+      return visualizations;
     }
     
     function getAvgFrequency(start = 0, end = bufferLength) {
@@ -1060,10 +981,6 @@
     function getBass() { return getAvgFrequency(0, 10) || 0; }
     function getMid() { return getAvgFrequency(10, 100) || 0; }
     function getTreble() { return getAvgFrequency(100, bufferLength) || 0; }
-    
-    function resetSpectrumPeaks() {
-      spectrumPeaks = new Float32Array(SPECTRUM_BARS);
-    }
     
     function getRmsLevel() {
       if (!timeArray || !timeArray.length) return 0;
@@ -1093,9 +1010,9 @@
     // Safe radius for canvas arc (prevents IndexSizeError)
     function safeRadius(r) { return Math.max(0.1, r) || 0.1; }
 
-    function ink(alpha = 1) {
-      return `rgba(255,255,255,${alpha})`;
-    }
+    function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
+
+    function lerp(a, b, t) { return a + (b - a) * t; }
 
     function clearCanvas(w, h, alpha = 1) {
       ctx.fillStyle = alpha >= 1 ? '#000' : `rgba(0,0,0,${alpha})`;
@@ -1145,153 +1062,6 @@
       ctx.globalAlpha = 1;
     }
 
-    // ==================== MONO SPECTRUM ====================
-    function drawMonoSpectrum() {
-      analyser.getByteFrequencyData(dataArray);
-      analyser.getByteTimeDomainData(timeArray);
-      const w = window.innerWidth, h = window.innerHeight;
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, w, h);
-      
-      const bars = 72;
-      const barW = w / bars;
-      const nyquist = (audioContext ? audioContext.sampleRate : 48000) / 2;
-      const minFreq = 30;
-      const maxFreq = Math.min(14000, nyquist);
-      const midY = h * 0.58;
-      
-      for (let i = 0; i < bars; i++) {
-        const t = i / (bars - 1);
-        const freq = minFreq * Math.pow(maxFreq / minFreq, t);
-        const idx = getFreqIndexForHz(freq, nyquist);
-        const val = dataArray[idx] / 255;
-        const height = Math.pow(val, 1.3) * h * 0.7;
-        const x = i * barW;
-        
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(x + 1, midY - height * 0.5, barW - 2, height);
-      }
-    }
-
-    // ==================== MONO RINGS ====================
-    function drawMonoRings() {
-      analyser.getByteFrequencyData(dataArray);
-      analyser.getByteTimeDomainData(timeArray);
-      const w = window.innerWidth, h = window.innerHeight;
-      const cx = w / 2, cy = h / 2;
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, w, h);
-      
-      time += 0.02;
-      const nyquist = (audioContext ? audioContext.sampleRate : 48000) / 2;
-      const bass = getAvgFrequencyByHz(30, 160, nyquist) / 255;
-      const mid = getAvgFrequencyByHz(160, 1200, nyquist) / 255;
-      
-      const rings = 5;
-      for (let i = 0; i < rings; i++) {
-        const radius = Math.min(w, h) * (0.12 + i * 0.09) * (1 + bass * 0.25);
-        ctx.beginPath();
-        ctx.arc(cx, cy, safeRadius(radius), 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255,255,255,0.75)';
-        ctx.lineWidth = 1 + i * 0.6 + mid * 2;
-        ctx.stroke();
-      }
-      
-      // Rotating radial lines
-      const spokes = 40;
-      const spin = time * (0.6 + mid);
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-      ctx.lineWidth = 1;
-      for (let i = 0; i < spokes; i++) {
-        const angle = (i / spokes) * Math.PI * 2 + spin;
-        const r1 = Math.min(w, h) * 0.12;
-        const r2 = Math.min(w, h) * (0.42 + bass * 0.2);
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(angle) * r1, cy + Math.sin(angle) * r1);
-        ctx.lineTo(cx + Math.cos(angle) * r2, cy + Math.sin(angle) * r2);
-        ctx.stroke();
-      }
-    }
-
-    // ==================== MONO GRID ====================
-    function drawMonoGrid() {
-      analyser.getByteTimeDomainData(timeArray);
-      const w = window.innerWidth, h = window.innerHeight;
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, w, h);
-      
-      const rows = 10;
-      const cols = 22;
-      const amp = getRmsLevel();
-      
-      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-      ctx.lineWidth = 1;
-      for (let r = 0; r <= rows; r++) {
-        const y = (r / rows) * h;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
-      }
-      
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-      for (let c = 0; c <= cols; c++) {
-        const x = (c / cols) * w;
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
-        ctx.stroke();
-      }
-      
-      // Waveform line
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      const slice = Math.max(1, Math.floor(timeArray.length / w));
-      for (let x = 0; x < w; x++) {
-        const idx = Math.min(timeArray.length - 1, x * slice);
-        const v = (timeArray[idx] - 128) / 128;
-        const y = h * 0.5 + v * h * 0.25 * (1 + amp);
-        if (x === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    }
-
-    // ==================== MONO PULSE ====================
-    function drawMonoPulse() {
-      analyser.getByteFrequencyData(dataArray);
-      analyser.getByteTimeDomainData(timeArray);
-      const w = window.innerWidth, h = window.innerHeight;
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, w, h);
-      
-      time += 0.015;
-      const nyquist = (audioContext ? audioContext.sampleRate : 48000) / 2;
-      const bass = getAvgFrequencyByHz(30, 140, nyquist) / 255;
-      const mid = getAvgFrequencyByHz(200, 1200, nyquist) / 255;
-      const size = Math.min(w, h) * (0.18 + bass * 0.35);
-      
-      // Pulsing square
-      ctx.save();
-      ctx.translate(w / 2, h / 2);
-      ctx.rotate(time * (0.3 + mid));
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2 + mid * 4;
-      ctx.strokeRect(-size, -size, size * 2, size * 2);
-      ctx.restore();
-      
-      // Corner dots
-      const dotR = 3 + bass * 6;
-      ctx.fillStyle = '#fff';
-      ctx.beginPath();
-      ctx.arc(w * 0.2, h * 0.2, dotR, 0, Math.PI * 2);
-      ctx.arc(w * 0.8, h * 0.2, dotR, 0, Math.PI * 2);
-      ctx.arc(w * 0.2, h * 0.8, dotR, 0, Math.PI * 2);
-      ctx.arc(w * 0.8, h * 0.8, dotR, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    
     // ==================== CIRCULAR ====================
     function drawCircular() {
       analyser.getByteFrequencyData(dataArray);
@@ -1343,33 +1113,74 @@
     // ==================== PARTICLES ====================
     function drawParticles() {
       analyser.getByteFrequencyData(dataArray);
-      const w = window.innerWidth, h = window.innerHeight;
       analyser.getByteTimeDomainData(timeArray);
-      clearCanvas(w, h, 1);
+      const w = window.innerWidth, h = window.innerHeight;
+      clearCanvas(w, h, 0.14);
+      time += 0.008;
       
-      const cols = Math.max(10, Math.floor(w / 90));
-      const rows = Math.max(6, Math.floor(h / 90));
-      const gapX = w / (cols + 1);
-      const gapY = h / (rows + 1);
-      const total = cols * rows;
-      const rms = getRmsLevel();
-      
-      ctx.fillStyle = '#fff';
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          const index = r * cols + c;
-          const idx = Math.floor((index / total) * bufferLength);
-          const val = dataArray[idx] / 255;
-          const size = 0.9 + val * 3 + rms * 2;
-          const alpha = 0.05 + val * 0.85;
-          const x = (c + 1) * gapX;
-          const y = (r + 1) * gapY;
-          
-          ctx.globalAlpha = alpha;
-          ctx.beginPath();
-          ctx.arc(x, y, safeRadius(size), 0, Math.PI * 2);
-          ctx.fill();
+      const targetCount = clamp(Math.floor((w * h) / 6800), 90, 210);
+      if (fieldNodes.length !== targetCount) {
+        fieldNodes = Array.from({ length: targetCount }, () => ({
+          x: Math.random() * w,
+          y: Math.random() * h,
+          vx: 0,
+          vy: 0,
+          px: 0,
+          py: 0
+        }));
+        for (const node of fieldNodes) {
+          node.px = node.x;
+          node.py = node.y;
         }
+      }
+      
+      const rms = getRmsLevel();
+      const speedBase = 0.55 + rms * 2.2;
+      const swirl = 1.1 + (getBass() / 255) * 1.6;
+      const step = Math.max(1, Math.floor(bufferLength / fieldNodes.length));
+      
+      ctx.strokeStyle = '#fff';
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < fieldNodes.length; i++) {
+        const node = fieldNodes[i];
+        const audio = dataArray[Math.min(bufferLength - 1, i * step)] / 255;
+        const nx = node.x / w - 0.5;
+        const ny = node.y / h - 0.5;
+        const angle =
+          Math.sin((ny * 10) + time * 1.8) * 1.1 +
+          Math.cos((nx * 9) - time * 1.2) * 0.9 +
+          Math.atan2(ny, nx) * 0.4 * swirl;
+        
+        const targetVx = Math.cos(angle) * (speedBase + audio * 1.8);
+        const targetVy = Math.sin(angle) * (speedBase + audio * 1.8);
+        node.vx = lerp(node.vx, targetVx, 0.12);
+        node.vy = lerp(node.vy, targetVy, 0.12);
+        
+        node.px = node.x;
+        node.py = node.y;
+        node.x += node.vx;
+        node.y += node.vy;
+        
+        if (node.x < -20) node.x = w + 20;
+        if (node.x > w + 20) node.x = -20;
+        if (node.y < -20) node.y = h + 20;
+        if (node.y > h + 20) node.y = -20;
+        
+        ctx.globalAlpha = 0.05 + audio * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(node.px, node.py);
+        ctx.lineTo(node.x, node.y);
+        ctx.stroke();
+      }
+      
+      const focusRadius = Math.min(w, h) * 0.2;
+      for (let i = 0; i < 4; i++) {
+        const pulse = (Math.sin(time * 2.2 + i) + 1) * 0.5;
+        ctx.globalAlpha = 0.05 + pulse * 0.1 + rms * 0.2;
+        ctx.beginPath();
+        ctx.arc(w * 0.5, h * 0.5, focusRadius * (0.65 + i * 0.22 + pulse * 0.08), 0, Math.PI * 2);
+        ctx.stroke();
       }
       
       ctx.globalAlpha = 1;
@@ -1446,96 +1257,201 @@
         ctx.stroke();
       }
       
-      ctx.globalAlpha = 0.15 + getRmsLevel() * 0.5;
+      const rms = getRmsLevel();
+      const travel = Math.sin(time * 2.2) * minDim * 0.04 + (rms - 0.25) * minDim * 0.12;
+      const lineX = cx + travel;
+      const lineTop = cy - minDim * 0.36;
+      const lineBottom = cy + minDim * 0.36;
+      const markerY = lerp(lineBottom, lineTop, clamp(rms * 1.5, 0, 1));
+      
+      ctx.globalAlpha = 0.16 + rms * 0.45;
       ctx.beginPath();
-      ctx.moveTo(cx, cy - minDim * 0.36);
-      ctx.lineTo(cx, cy + minDim * 0.36);
+      ctx.moveTo(lineX, lineTop);
+      ctx.lineTo(lineX, lineBottom);
       ctx.stroke();
+      
+      ctx.globalAlpha = 0.45 + rms * 0.4;
+      ctx.beginPath();
+      ctx.arc(lineX, markerY, safeRadius(2 + rms * 7), 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
       ctx.globalAlpha = 1;
     }
     
-    // ==================== MATRIX ====================
-    let matrixDrops = [];
-    function drawMatrix() {
+    // ==================== SPECTROGRAM ====================
+    function drawSpectrogram() {
       analyser.getByteFrequencyData(dataArray);
+      analyser.getByteTimeDomainData(timeArray);
       const w = window.innerWidth, h = window.innerHeight;
       
-      clearCanvas(w, h, 1);
+      clearCanvas(w, h, 0.26);
       
-      const cols = Math.max(18, Math.floor(w / 60));
-      const colW = w / cols;
-      const baseY = h * 0.75;
-      const maxH = h * 0.5;
-      
-      ctx.fillStyle = '#fff';
-      for (let i = 0; i < cols; i++) {
-        const idx = Math.floor(i * bufferLength / cols);
-        const val = dataArray[idx] / 255;
-        const height = Math.pow(val, 1.5) * maxH;
-        const width = colW * 0.3;
-        const x = i * colW + colW * 0.35;
-        
-        ctx.globalAlpha = 0.06 + val * 0.85;
-        ctx.fillRect(x, baseY - height, width, height);
-        
-        ctx.globalAlpha = 0.12 + val * 0.8;
-        ctx.fillRect(x, baseY - height - 4, width, 2);
+      const nyquist = (audioContext ? audioContext.sampleRate : 48000) / 2;
+      const minFreq = 28;
+      const maxFreq = Math.min(17000, nyquist);
+      const row = new Float32Array(SPECTROGRAM_BINS);
+      for (let i = 0; i < SPECTROGRAM_BINS; i++) {
+        const t = i / (SPECTROGRAM_BINS - 1);
+        const freq = minFreq * Math.pow(maxFreq / minFreq, t);
+        const idx = getFreqIndexForHz(freq, nyquist);
+        row[i] = Math.pow(dataArray[idx] / 255, 1.25);
       }
       
+      spectrogramHistory.unshift(row);
+      const rowHeight = 3;
+      const maxRows = Math.floor((h * 0.96) / (rowHeight * 2));
+      if (spectrogramHistory.length > maxRows) spectrogramHistory.length = maxRows;
+      
+      const bandW = w / SPECTROGRAM_BINS;
+      const centerY = h * 0.5;
+      for (let r = 0; r < spectrogramHistory.length; r++) {
+        const fade = 1 - r / maxRows;
+        const yTop = centerY - r * rowHeight;
+        const yBottom = centerY + r * rowHeight;
+        const energy = spectrogramHistory[r];
+        
+        for (let i = 0; i < SPECTROGRAM_BINS; i++) {
+          const val = energy[i];
+          if (val < 0.02) continue;
+          const alpha = Math.pow(val, 0.9) * fade * 0.95;
+          ctx.globalAlpha = alpha;
+          const x = i * bandW;
+          const width = Math.max(1, bandW - 1);
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(x, yBottom, width, rowHeight - 1);
+          ctx.fillRect(x, yTop - rowHeight + 1, width, rowHeight - 1);
+        }
+      }
+      
+      const rms = getRmsLevel();
+      const markerW = w * (0.06 + rms * 0.16);
+      ctx.globalAlpha = 0.2 + rms * 0.4;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect((w - markerW) * 0.5, centerY - 1, markerW, 2);
+      
+      ctx.globalAlpha = 0.08 + rms * 0.3;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.08, centerY);
+      ctx.lineTo(w * 0.92, centerY);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.stroke();
       ctx.globalAlpha = 1;
     }
     
     // ==================== FIREWORKS ====================
     let fireworks = [];
-    let fwParticles = [];
     function drawFireworks() {
       analyser.getByteFrequencyData(dataArray);
+      analyser.getByteTimeDomainData(timeArray);
       const w = window.innerWidth, h = window.innerHeight;
       
-      clearCanvas(w, h, 0.12);
-      time += 0.01;
-      
-      const bass = getBass() || 0;
+      clearCanvas(w, h, 0.18);
+      time += 0.013;
+      const bass = getBass() / 255;
+      const rms = getRmsLevel();
       const minDim = Math.min(w, h);
-      const shouldLaunch = bass > 170 && Math.random() > 0.65;
+      const shouldLaunch = (bass > 0.62 && Math.random() > 0.45) || Math.random() > 0.992;
       
       if (shouldLaunch && fireworks.length < 8) {
         fireworks.push({
-          x: w * 0.5 + (Math.random() - 0.5) * minDim * 0.5,
-          y: h * 0.5 + (Math.random() - 0.5) * minDim * 0.3,
+          x: w * 0.5 + (Math.random() - 0.5) * minDim * 0.42,
+          y: h * 0.5 + (Math.random() - 0.5) * minDim * 0.26,
           life: 1,
-          lines: 18 + Math.floor(Math.random() * 12),
-          radius: minDim * (0.05 + Math.random() * 0.08),
-          spin: Math.random() * Math.PI * 2
+          lines: 22 + Math.floor(Math.random() * 24),
+          radius: minDim * (0.05 + Math.random() * 0.06),
+          spin: Math.random() * Math.PI * 2,
+          driftX: (Math.random() - 0.5) * 0.7,
+          driftY: (Math.random() - 0.5) * 0.6
         });
+        
+        const sparks = 20 + Math.floor(Math.random() * 26);
+        for (let i = 0; i < sparks; i++) {
+          const angle = (i / sparks) * Math.PI * 2 + Math.random() * 0.4;
+          const speed = 0.8 + Math.random() * (1.6 + bass * 2.8);
+          burstSparks.push({
+            x: fireworks[fireworks.length - 1].x,
+            y: fireworks[fireworks.length - 1].y,
+            px: fireworks[fireworks.length - 1].x,
+            py: fireworks[fireworks.length - 1].y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 1
+          });
+        }
       }
       
       const nextBursts = [];
       ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1.2;
       
       for (let i = 0; i < fireworks.length; i++) {
         const burst = fireworks[i];
         const energy = getMid() / 255;
-        const radius = burst.radius * (1.2 - burst.life) + burst.radius * 0.6;
+        burst.x += burst.driftX;
+        burst.y += burst.driftY;
+        const growth = 1.4 - burst.life;
+        const radius = burst.radius * (0.7 + growth * 2.2 + energy * 0.4);
         
         for (let j = 0; j < burst.lines; j++) {
-          const angle = (j / burst.lines) * Math.PI * 2 + burst.spin + time * 0.4;
-          ctx.globalAlpha = burst.life * (0.15 + energy * 0.85);
+          const angle = (j / burst.lines) * Math.PI * 2 + burst.spin + time * 0.8;
+          const inner = radius * (0.18 + 0.22 * Math.sin(time * 3 + j));
+          const outer = radius * (0.85 + 0.25 * Math.sin(time * 2 + j * 0.3));
+          ctx.globalAlpha = burst.life * (0.06 + energy * 0.88);
           ctx.beginPath();
-          ctx.moveTo(burst.x, burst.y);
+          ctx.moveTo(
+            burst.x + Math.cos(angle) * inner,
+            burst.y + Math.sin(angle) * inner
+          );
           ctx.lineTo(
-            burst.x + Math.cos(angle) * radius,
-            burst.y + Math.sin(angle) * radius
+            burst.x + Math.cos(angle) * outer,
+            burst.y + Math.sin(angle) * outer
           );
           ctx.stroke();
         }
         
-        burst.life -= 0.02;
+        for (let ring = 0; ring < 3; ring++) {
+          ctx.globalAlpha = burst.life * (0.09 + ring * 0.07);
+          ctx.beginPath();
+          ctx.arc(
+            burst.x,
+            burst.y,
+            safeRadius(radius * (0.45 + ring * 0.23) + Math.sin(time * 4 + ring) * 3),
+            0,
+            Math.PI * 2
+          );
+          ctx.stroke();
+        }
+        
+        burst.life -= 0.018 + energy * 0.01;
         if (burst.life > 0) nextBursts.push(burst);
       }
       
       fireworks = nextBursts;
+      
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = '#fff';
+      burstSparks = burstSparks.filter(spark => spark.life > 0.02);
+      for (const spark of burstSparks) {
+        spark.px = spark.x;
+        spark.py = spark.y;
+        spark.x += spark.vx;
+        spark.y += spark.vy;
+        spark.vx *= 0.985;
+        spark.vy *= 0.985;
+        spark.life -= 0.024;
+        
+        ctx.globalAlpha = spark.life * 0.45;
+        ctx.beginPath();
+        ctx.moveTo(spark.px, spark.py);
+        ctx.lineTo(spark.x, spark.y);
+        ctx.stroke();
+      }
+      
+      ctx.globalAlpha = 0.18 + rms * 0.5;
+      ctx.beginPath();
+      ctx.arc(w * 0.5, h * 0.5, safeRadius(minDim * (0.14 + rms * 0.06)), 0, Math.PI * 2);
+      ctx.stroke();
       ctx.globalAlpha = 1;
     }
     
@@ -1545,39 +1461,62 @@
       const w = window.innerWidth, h = window.innerHeight;
       
       analyser.getByteTimeDomainData(timeArray);
-      clearCanvas(w, h, 0.08);
-      
+      clearCanvas(w, h, 0.1);
       time += 0.012;
-      const lines = 6;
-      const baseY = h * 0.35;
-      const amp = h * 0.16;
+      
       const rms = getRmsLevel();
+      const centerX = w * 0.5;
+      const span = w * 0.8;
+      const startX = centerX - span * 0.5;
+      const endX = centerX + span * 0.5;
+      const baseY = h * 0.43;
+      const amp = h * 0.14;
+      const layers = 7;
+      const points = Math.max(120, Math.floor(span / 7));
       
       ctx.lineWidth = 1;
       ctx.strokeStyle = '#fff';
-      
-      for (let layer = 0; layer < lines; layer++) {
-        const yBase = baseY + layer * (h * 0.08);
-        const points = Math.max(80, Math.floor(w / 10));
+      for (let layer = 0; layer < layers; layer++) {
+        const yBase = baseY + layer * (h * 0.065);
         ctx.beginPath();
         for (let i = 0; i <= points; i++) {
-          const x = (i / points) * w;
-          const idx = Math.floor(i * bufferLength / points);
-          const val = dataArray[idx] / 255;
-          const wave = Math.sin(time * 2 + i * 0.04 + layer) * amp * 0.18;
-          const audio = (val - 0.5) * amp * 0.7;
-          const y = yBase + wave - audio;
+          const t = i / points;
+          const x = lerp(startX, endX, t);
+          const idx = Math.floor(t * (bufferLength - 1));
+          const audio = (dataArray[idx] / 255 - 0.5) * amp;
+          const envelope = Math.sin(Math.PI * t);
+          const wave =
+            Math.sin(time * 2 + t * 9 + layer * 0.35) * amp * 0.22 +
+            Math.sin(time * 1.4 + t * 15 + layer) * amp * 0.08;
+          const y = yBase - (wave + audio * 0.58) * envelope;
           if (i === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
-        ctx.globalAlpha = 0.05 + layer * 0.05 + rms * 0.5;
+        ctx.globalAlpha = 0.06 + layer * 0.04 + rms * 0.4;
         ctx.stroke();
       }
       
-      ctx.globalAlpha = 0.2;
+      const crownY = baseY - amp * 0.56;
+      const pulse = clamp(rms * 1.7, 0, 1);
+      const windowW = span * (0.18 + pulse * 0.25);
+      const offset = Math.sin(time * 1.8) * span * 0.12;
+      ctx.globalAlpha = 0.16 + pulse * 0.5;
       ctx.beginPath();
-      ctx.moveTo(w * 0.08, baseY - amp * 0.2);
-      ctx.lineTo(w * 0.92, baseY - amp * 0.2);
+      ctx.moveTo(startX, crownY);
+      ctx.lineTo(endX, crownY);
+      ctx.stroke();
+      
+      ctx.globalAlpha = 0.42 + pulse * 0.4;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(centerX - windowW * 0.5 + offset, crownY);
+      ctx.lineTo(centerX + windowW * 0.5 + offset, crownY);
+      ctx.stroke();
+      
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.12 + pulse * 0.4;
+      ctx.beginPath();
+      ctx.arc(centerX, baseY + amp * 0.95, safeRadius(span * (0.12 + pulse * 0.04)), 0, Math.PI * 2);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -1588,43 +1527,66 @@
       const w = window.innerWidth, h = window.innerHeight;
       
       analyser.getByteTimeDomainData(timeArray);
-      clearCanvas(w, h, 1);
+      clearCanvas(w, h, 0.95);
       
-      time += 0.01;
-      const horizon = h * 0.56 + (getBass() / 255) * h * 0.03;
-      const cols = 14;
-      const rows = 14;
+      time += 0.013;
+      const bass = getBass() / 255;
+      const rms = getRmsLevel();
+      const horizon = h * 0.56 + bass * h * 0.028;
+      const cols = 18;
+      const rows = 18;
+      const sweep = (time * 70) % (h - horizon);
       
       ctx.lineWidth = 1;
       ctx.strokeStyle = '#fff';
-      
       for (let i = -cols; i <= cols; i++) {
-        const xTop = w / 2 + i * (w * 0.03);
-        const xBottom = w / 2 + i * (w * 0.18);
-        const falloff = 1 - Math.abs(i) / cols;
+        const t = i / cols;
+        const xTop = w * 0.5 + t * w * 0.16;
+        const xBottom = w * 0.5 + t * w * 0.72;
+        const bend = Math.sin(time * 1.8 + t * 2.5) * w * 0.01 * (0.2 + bass);
+        const falloff = 1 - Math.abs(t);
         ctx.globalAlpha = 0.05 + falloff * 0.5;
         ctx.beginPath();
-        ctx.moveTo(xTop, horizon);
-        ctx.lineTo(xBottom, h);
+        ctx.moveTo(xTop + bend, horizon);
+        ctx.lineTo(xBottom + bend * 2.6, h);
         ctx.stroke();
       }
       
       for (let r = 0; r <= rows; r++) {
         const t = r / rows;
-        const y = horizon + Math.pow(t, 2) * (h - horizon);
-        const idx = Math.floor(t * bufferLength);
+        const y = horizon + Math.pow(t, 2.08) * (h - horizon);
+        const idx = Math.floor(t * (bufferLength - 1));
         const val = dataArray[idx] / 255;
-        ctx.globalAlpha = 0.05 + val * 0.6;
+        ctx.globalAlpha = 0.05 + val * 0.54;
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(w, y);
         ctx.stroke();
       }
       
-      const frameW = Math.min(w, h) * 0.36;
-      const frameH = frameW * 0.52;
-      ctx.globalAlpha = 0.18 + getRmsLevel() * 0.6;
-      ctx.strokeRect(w / 2 - frameW / 2, horizon - frameH * 0.9, frameW, frameH);
+      const frameW = Math.min(w, h) * 0.38 * (1 + rms * 0.08);
+      const frameH = frameW * (0.5 + bass * 0.08);
+      const frameY = horizon - frameH * 0.92;
+      ctx.globalAlpha = 0.14 + rms * 0.66;
+      ctx.strokeRect(w * 0.5 - frameW * 0.5, frameY, frameW, frameH);
+      
+      const wavePts = Math.max(80, Math.floor(w / 9));
+      ctx.globalAlpha = 0.12 + rms * 0.65;
+      ctx.beginPath();
+      for (let i = 0; i <= wavePts; i++) {
+        const t = i / wavePts;
+        const x = t * w;
+        const idx = Math.floor(t * (bufferLength - 1));
+        const val = dataArray[idx] / 255 - 0.5;
+        const y = horizon - 12 + Math.sin(time * 3 + t * 10) * 5 - val * (h * 0.07);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      
+      ctx.globalAlpha = 0.09 + rms * 0.35;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, horizon + sweep, w, 1.4);
       
       ctx.globalAlpha = 1;
     }
@@ -1635,26 +1597,51 @@
       analyser.getByteTimeDomainData(timeArray);
       const w = window.innerWidth, h = window.innerHeight;
       
-      clearCanvas(w, h, 1);
+      clearCanvas(w, h, 0.16);
+      time += 0.014;
       
-      time += 0.012;
       const minDim = Math.min(w, h);
       const rms = getRmsLevel();
-      const layers = 10;
+      const layers = 14;
+      const spokes = 12;
+      const centerX = w * 0.5;
+      const centerY = h * 0.5;
       
       ctx.save();
-      ctx.translate(w / 2, h / 2);
-      ctx.rotate(time * 0.3);
+      ctx.translate(centerX, centerY);
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 1;
-      
       for (let i = 0; i < layers; i++) {
         const t = i / (layers - 1);
-        const idx = Math.floor(t * bufferLength);
+        const idx = Math.floor(t * (bufferLength - 1));
         const val = dataArray[idx] / 255;
-        const size = minDim * (0.65 - t * 0.5) * (1 + rms * 0.08);
-        ctx.globalAlpha = 0.05 + val * 0.75;
-        ctx.strokeRect(-size / 2, -size / 2, size, size);
+        const size = minDim * (0.18 + t * 0.48) * (0.9 + rms * 0.2);
+        const rot = time * (0.2 + t * 0.8) * (i % 2 === 0 ? 1 : -1);
+        ctx.save();
+        ctx.rotate(rot);
+        ctx.globalAlpha = 0.04 + val * 0.6;
+        ctx.strokeRect(-size * 0.5, -size * 0.5, size, size);
+        ctx.restore();
+      }
+      
+      for (let i = 0; i < spokes; i++) {
+        const t = i / spokes;
+        const idx = Math.floor(t * (bufferLength - 1));
+        const val = dataArray[idx] / 255;
+        const angle = t * Math.PI * 2 + time * 0.5;
+        const r1 = minDim * 0.09;
+        const r2 = minDim * (0.3 + val * 0.23);
+        ctx.globalAlpha = 0.05 + val * 0.55;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(angle) * r1, Math.sin(angle) * r1);
+        ctx.lineTo(Math.cos(angle) * r2, Math.sin(angle) * r2);
+        ctx.stroke();
+        
+        ctx.globalAlpha = 0.12 + val * 0.45;
+        ctx.beginPath();
+        ctx.arc(Math.cos(angle) * r2, Math.sin(angle) * r2, safeRadius(1.2 + val * 4.2), 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
       }
       
       ctx.restore();
@@ -1688,18 +1675,6 @@
     }
     renderVizButtons();
     
-    // Build palette buttons
-    const paletteBar = document.getElementById('paletteBar');
-    colorSchemes.forEach((scheme, i) => {
-      const btn = document.createElement('button');
-      btn.className = 'palette-btn' + (i === currentColorIndex ? ' active' : '');
-      const gradient = `linear-gradient(90deg, ${scheme.colors.join(',')})`;
-      btn.innerHTML = `<span class="palette-swatch" style="background: ${gradient}"></span>${scheme.name}`;
-      btn.dataset.index = i;
-      btn.onclick = () => setColorScheme(i);
-      paletteBar.appendChild(btn);
-    });
-    
     function setVisualization(index) {
       const list = getActiveVisualizations();
       const safeIndex = Math.max(0, Math.min(index, list.length - 1));
@@ -1707,33 +1682,23 @@
       document.querySelectorAll('.viz-btn').forEach((b, i) => {
         b.classList.toggle('active', i === safeIndex);
       });
-      showModeDisplay(list[safeIndex].name, monoMode ? '#fff' : getColorRaw(0));
+      showModeDisplay(list[safeIndex].name);
       // Reset mode-specific state
-      particles = [];
+      fieldNodes = [];
       fireworks = [];
-      fwParticles = [];
-      matrixDrops = [];
-      resetSpectrumPeaks();
+      burstSparks = [];
+      spectrogramHistory = [];
       // Reset canvas state
       ctx.globalAlpha = 1;
       ctx.shadowBlur = 0;
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
-    
-    function setColorScheme(index) {
-      if (monoMode) return;
-      currentColorIndex = index;
-      document.querySelectorAll('.palette-btn').forEach((b, i) => {
-        b.classList.toggle('active', i === index);
-      });
-      showModeDisplay(colorSchemes[index].name, colorSchemes[index].colors[0]);
-    }
-    
-    function showModeDisplay(text, color = null) {
+
+    function showModeDisplay(text, color = '#fff') {
       const display = document.getElementById('modeDisplay');
       display.textContent = text;
-      display.style.color = color || getColorRaw(0);
+      display.style.color = color;
       display.classList.add('show');
       setTimeout(() => display.classList.remove('show'), 800);
     }
@@ -2435,14 +2400,6 @@
     document.getElementById('playBtn').onclick = () => isPlaying ? pause() : play();
     document.getElementById('folderBtn').onclick = () => chooseFolder();
     document.getElementById('rescanBtn').onclick = () => rescanLibrary();
-    document.getElementById('monoBtn').onclick = () => {
-      monoMode = !monoMode;
-      document.getElementById('monoBtn').textContent = monoMode ? 'Tones [M]' : 'Mono [M]';
-      document.getElementById('paletteBar').style.display = monoMode ? 'none' : 'flex';
-      currentVizIndex = 0;
-      renderVizButtons();
-      setVisualization(0);
-    };
     document.getElementById('helpBtn').onclick = () => toggleHelp();
     document.getElementById('helpClose').onclick = () => toggleHelp(false);
     document.getElementById('helpOverlay').addEventListener('click', e => {
@@ -2516,12 +2473,6 @@
           break;
         case 'KeyF':
           document.getElementById('fullscreenBtn').click();
-          break;
-        case 'KeyC':
-          setColorScheme((currentColorIndex + 1) % colorSchemes.length);
-          break;
-        case 'KeyM':
-          document.getElementById('monoBtn').click();
           break;
         case 'KeyO':
           chooseFolder();
